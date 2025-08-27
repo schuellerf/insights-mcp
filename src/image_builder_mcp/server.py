@@ -367,6 +367,7 @@ class ImageBuilderMCP(InsightsMCP):
         4. Image type ("What image type do you need? Available: {image_types} or take guest-image as default")
         5. Username ("Do you want to create a custom user account? If so, what username?")
         6. For RHEL images specifically: "Do you want to enable registration for Red Hat services?"
+           (use get_activation_keys to check available activation keys)
         7. Any customizations ("Do you need any specific packages, services, or configurations?")
 
         🚨 CRITICAL REPOSITORY REQUIREMENT:

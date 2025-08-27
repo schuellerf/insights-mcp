@@ -44,3 +44,7 @@
 
 ## rbac
 - `get_all_access`: Get access information for all Red Hat insights applications.
+
+## rhsm
+- `get_activation_keys`: Get the list of activation keys available to the authenticated user.
+- `get_organization_info`: Get organization information for the authenticated user.

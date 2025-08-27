@@ -45,6 +45,8 @@ repo
 RESTful
 rhel
 RHEL
+rhsm
+RHSM
 SSO
 Starlette
 Streamable
