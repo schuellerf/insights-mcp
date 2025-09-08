@@ -23,19 +23,14 @@ def get_mcp_tools_with_toolset(transport: str, toolset: str | None = None) -> Li
     Returns:
         List of MCP tools
     """
-    server_url, server_process = start_insights_mcp_server(transport, toolset=toolset)
-
-    try:
-        if server_url == "stdio":
-            # For stdio, use subprocess approach with toolset
-            args = ["-m", "insights_mcp.server"]
-            if toolset is not None:
-                args.extend(["--toolset", toolset])
-            args.append("stdio")
-            client = BasicMCPClient("python", args=args)
-        else:
-            # For HTTP/SSE, connect to running server
-            client = BasicMCPClient(server_url)
+    if transport == "stdio":
+        # For stdio, BasicMCPClient handles the subprocess entirely
+        # No need to start a separate server process
+        args = ["-m", "insights_mcp.server"]
+        if toolset is not None:
+            args.extend(["--toolset", toolset])
+        args.append("stdio")
+        client = BasicMCPClient("python", args=args)
 
         tool_spec = McpToolSpec(client=client)
 
@@ -43,9 +38,21 @@ def get_mcp_tools_with_toolset(transport: str, toolset: str | None = None) -> Li
             return await tool_spec.to_tool_list_async()
 
         return asyncio.run(_fetch())
+    else:
+        # For HTTP/SSE, start server process and connect to it
+        server_url, server_process = start_insights_mcp_server(transport, toolset=toolset)
 
-    finally:
-        cleanup_server_process(server_process)
+        try:
+            client = BasicMCPClient(server_url)
+            tool_spec = McpToolSpec(client=client)
+
+            async def _fetch():
+                return await tool_spec.to_tool_list_async()
+
+            return asyncio.run(_fetch())
+
+        finally:
+            cleanup_server_process(server_process)
 
 
 class TestCliArguments:

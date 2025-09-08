@@ -107,12 +107,17 @@ def mcp_server_url(request):
     if hasattr(request.node, "callspec") and "transport" in request.node.callspec.params:
         transport = request.node.callspec.params["transport"]
 
-    server_url, server_process = start_insights_mcp_server(transport)
+    if transport == "stdio":
+        # For stdio, we don't need to start a server process
+        # BasicMCPClient will handle the subprocess entirely
+        yield "stdio"
+    else:
+        server_url, server_process = start_insights_mcp_server(transport)
 
-    try:
-        yield server_url
-    finally:
-        cleanup_server_process(server_process)
+        try:
+            yield server_url
+        finally:
+            cleanup_server_process(server_process)
 
 
 @pytest.fixture()
