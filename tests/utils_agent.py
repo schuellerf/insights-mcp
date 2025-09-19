@@ -43,6 +43,9 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         model_id: str,
         api_key: str,
         verbose_logger: Optional[logging.Logger] = None,
+        *,
+        tools_override: Optional[List[Union[BaseTool, Callable]]] = None,
+        system_prompt_override: Optional[str] = None,
     ):  # pylint: disable=too-many-instance-attributes
         self.server_url = server_url
         self.api_url = api_url
@@ -72,8 +75,14 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         if verbose_logger:
             self.logger = verbose_logger
 
-        # Run async initialization
-        asyncio.run(self._initialize())
+        # If tools are provided, skip MCP initialization and use provided tools
+        if tools_override is not None:
+            self.tools = tools_override
+            self.system_prompt = system_prompt_override or ""
+            asyncio.run(self._setup_agent())
+        else:
+            # Run async initialization via MCP
+            asyncio.run(self._initialize())
 
     async def _initialize(self):
         """Initialize MCP session and get available tools."""
