@@ -131,3 +131,22 @@ class InsightsMCP(FastMCP):
 
         for tool_name in tools_to_remove:
             self.remove_tool(tool_name)
+
+    def reset_tools(self):
+        """Reset the MCP server by clearing all registered tools for tests.
+
+        This method clears all tools from the server, allowing it to be
+        re-initialized without duplicate registration warnings.
+        """
+        if hasattr(self, "_tool_manager") and hasattr(self._tool_manager, "_tools"):
+            self._tool_manager._tools.clear()  # pylint: disable=protected-access
+
+    async def aclose(self):
+        """Close the MCP server and clean up resources for tests.
+
+        This method properly closes the insights client and resets tools
+        to ensure clean shutdown for tests
+        """
+        if hasattr(self, "insights_client") and hasattr(self.insights_client, "aclose"):
+            await self.insights_client.aclose()
+        self.reset_tools()

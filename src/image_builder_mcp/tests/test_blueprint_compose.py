@@ -5,7 +5,6 @@ import pytest
 from tests.conftest import (
     TEST_BLUEPRINT_UUID,
     assert_api_error_result,
-    assert_instruction_in_result,
 )
 
 from .conftest import setup_imagebuilder_mock
@@ -41,7 +40,6 @@ class TestBlueprintCompose:
             imagebuilder_mock_client.post.assert_called_once_with(f"blueprints/{blueprint_uuid}/compose")
 
             # Parse the result
-            assert_instruction_in_result(result)
             assert "Use the tool get_compose_details" in result
             assert "Compose created successfully" in result
             assert "abcd1234-5678-9012-3456-789012345678" in result

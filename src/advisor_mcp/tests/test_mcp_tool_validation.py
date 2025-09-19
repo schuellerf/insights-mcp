@@ -9,6 +9,7 @@ from typing import Any, Dict
 import pytest
 
 # Import the test pattern functions from top-level tests
+from tests.conftest import MCPTestServerConfig
 from tests.test_patterns import (  # pylint: disable=import-error
     assert_mcp_tool_descriptions_and_annotations,
     assert_stdio_transport_exposes_tool,
@@ -17,7 +18,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
 
 
 @pytest.mark.parametrize(
-    "tool_name, expected_desc, params",
+    "tool_name, expected_desc, params, mcp_test_client_stdio",
     [
         (
             "advisor__get_active_rules",
@@ -67,6 +68,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
                     "anyOf": [{"type": "string"}, {"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
                 },
             },
+            MCPTestServerConfig(transport="http"),
         ),
         (
             "advisor__get_rule_details",
@@ -79,6 +81,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
                     "anyOf": None,
                 }
             },
+            MCPTestServerConfig(transport="http"),
         ),
         (
             "advisor__get_rule_from_node_id",
@@ -91,6 +94,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
                     "anyOf": None,
                 }
             },
+            MCPTestServerConfig(transport="http"),
         ),
         (
             "advisor__get_hosts_hitting_a_rule",
@@ -103,6 +107,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
                     "anyOf": None,
                 }
             },
+            MCPTestServerConfig(transport="http"),
         ),
         (
             "advisor__get_hosts_details_hitting_a_rule",
@@ -128,6 +133,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
                     "anyOf": [{"type": "string"}, {"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
                 },
             },
+            MCPTestServerConfig(transport="http"),
         ),
         (
             "advisor__get_rule_by_text_search",
@@ -140,6 +146,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
                     "anyOf": None,
                 }
             },
+            MCPTestServerConfig(transport="http"),
         ),
         (
             "advisor__get_recommendations_statistics",
@@ -163,6 +170,7 @@ from tests.test_patterns import (  # pylint: disable=import-error
                     "anyOf": [{"type": "string"}, {"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
                 },
             },
+            MCPTestServerConfig(transport="http"),
         ),
     ],
     ids=[
@@ -174,25 +182,33 @@ from tests.test_patterns import (  # pylint: disable=import-error
         "advisor__get_rule_by_text_search",
         "advisor__get_recommendations_statistics",
     ],
+    indirect=["mcp_test_client_stdio"],
 )
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def test_mcp_tools_include_descriptions_and_annotations(
-    mcp_tools,
+    mcp_test_client_stdio,
+    mcp_tools_stdio,
     subtests,
     tool_name: str,
     expected_desc: str,
     params: Dict[str, Dict[str, Any]],
 ):  # pylint: disable=redefined-outer-name
     """Test that the advisor MCP tools include descriptions and annotations."""
-    assert_mcp_tool_descriptions_and_annotations(mcp_tools, subtests, tool_name, expected_desc, params)
+    _ = mcp_test_client_stdio  # mark as used for pytest.mark.parametrize
+    assert_mcp_tool_descriptions_and_annotations(mcp_tools_stdio, subtests, tool_name, expected_desc, params)
 
 
-@pytest.mark.parametrize("mcp_server_url", ["http", "sse"], indirect=True)
-def test_transport_types_with_get_active_rules(mcp_tools, request):
+@pytest.mark.parametrize(
+    "inmemory_test_mcp_server",
+    [MCPTestServerConfig(transport="http"), MCPTestServerConfig(transport="sse")],
+    indirect=True,
+)
+def test_transport_types_with_get_active_rules(mcp_tools_network, request, inmemory_test_mcp_server):
     """Test that http and sse transport types can start and expose get_active_rules tool."""
-    assert_transport_types_expose_tool(mcp_tools, request, "advisor__get_active_rules")
+    _ = inmemory_test_mcp_server  # mark as used for pytest.mark.parametrize
+    assert_transport_types_expose_tool(mcp_tools_network, request, "advisor__get_active_rules")
 
 
-@pytest.mark.parametrize("mcp_server_url", ["stdio"], indirect=True)
-def test_stdio_transport_with_get_active_rules(mcp_tools):
+def test_stdio_transport_with_get_active_rules(mcp_tools_stdio):
     """Test stdio transport with get_active_rules tool using BasicMCPClient subprocess."""
-    assert_stdio_transport_exposes_tool(mcp_tools, "advisor__get_active_rules")
+    assert_stdio_transport_exposes_tool(mcp_tools_stdio, "advisor__get_active_rules")

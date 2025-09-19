@@ -9,6 +9,7 @@ from typing import Any, Dict
 import pytest
 
 # Import the test pattern functions from top-level tests
+from tests.conftest import MCPTestServerConfig
 from tests.test_patterns import (
     assert_mcp_tool_descriptions_and_annotations,
     assert_stdio_transport_exposes_tool,
@@ -71,23 +72,27 @@ from tests.test_patterns import (
     ids=["image-builder__get_blueprints", "image-builder__get_composes", "image-builder__get_openapi"],
 )
 def test_mcp_tools_include_descriptions_and_annotations(
-    mcp_tools,
+    mcp_tools_stdio,
     subtests,
     tool_name: str,
     expected_desc: str,
     params: Dict[str, Dict[str, Any]],
 ):  # pylint: disable=redefined-outer-name
     """Test that the image-builder MCP tools include descriptions and annotations."""
-    assert_mcp_tool_descriptions_and_annotations(mcp_tools, subtests, tool_name, expected_desc, params)
+    assert_mcp_tool_descriptions_and_annotations(mcp_tools_stdio, subtests, tool_name, expected_desc, params)
 
 
-@pytest.mark.parametrize("mcp_server_url", ["http", "sse"], indirect=True)
-def test_transport_types_with_get_blueprints(mcp_tools, request):
+@pytest.mark.parametrize(
+    "inmemory_test_mcp_server",
+    [MCPTestServerConfig(transport="http"), MCPTestServerConfig(transport="sse")],
+    indirect=True,
+)
+def test_transport_types_with_get_blueprints(mcp_tools_network, request, inmemory_test_mcp_server):
     """Test that http and sse transport types can start and expose get_blueprints tool."""
-    assert_transport_types_expose_tool(mcp_tools, request, "image-builder__get_blueprints")
+    _ = inmemory_test_mcp_server  # mark as used for pytest.mark.parametrize
+    assert_transport_types_expose_tool(mcp_tools_network, request, "image-builder__get_blueprints")
 
 
-@pytest.mark.parametrize("mcp_server_url", ["stdio"], indirect=True)
-def test_stdio_transport_with_get_blueprints(mcp_tools):
+def test_stdio_transport_with_get_blueprints(mcp_tools_stdio):
     """Test stdio transport with get_blueprints tool using BasicMCPClient subprocess."""
-    assert_stdio_transport_exposes_tool(mcp_tools, "image-builder__get_blueprints")
+    assert_stdio_transport_exposes_tool(mcp_tools_stdio, "image-builder__get_blueprints")

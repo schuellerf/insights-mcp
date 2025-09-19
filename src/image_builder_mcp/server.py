@@ -6,8 +6,6 @@ import os
 from typing import Annotated, Any, Optional
 
 import httpx
-import jwt
-from fastmcp.server.dependencies import get_http_headers
 from fastmcp.tools.tool import Tool
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -44,8 +42,8 @@ class ImageBuilderMCP(InsightsMCP):
             "and use the parameters offset and limit accordingly.\n"
         )
 
-        general_intro = """You are a comprehensive Linux Image Builder assistant that creates custom
-        Linux disk images, ISOs, and virtual machine images.
+        general_intro = """This server provides tools for creating, managing, and building
+        custom Linux disk images, ISOs, and virtual machine images using the Red Hat Image Builder service.
 
         You can build images for multiple Linux distributions including:
         - Red Hat Enterprise Linux (RHEL)
@@ -101,13 +99,10 @@ class ImageBuilderMCP(InsightsMCP):
         2. Include the SAME repository UUIDs in BOTH payload_repositories AND custom_repositories fields
         3. This dual inclusion is MANDATORY - missing either field causes build failures
         4. NEVER make up or guess repository UUIDs - ALWAYS use the actual UUIDs from content-sources_list_repositories
-
-        <|function_call_library|>
-
         """
 
         super().__init__(
-            name="Image Builder MCP Server",
+            name="Red Hat Insights Image Builder MCP Server",
             toolset_name="image-builder",
             api_path="api/image-builder/v1",
             headers={"X-ImageBuilder-ui": self.image_builder_mcp_client_id},
@@ -123,7 +118,7 @@ class ImageBuilderMCP(InsightsMCP):
         try:
             # TBD: change openapi spec to have a proper schema-enum
             # for image types and architectures
-            self.logger.info("Getting openapi")
+            self.logger.debug("Getting openapi")
             openapi = json.loads(self.get_openapi_synchronous())
 
             image_types = list(openapi["components"]["schemas"]["ImageTypes"]["enum"])
@@ -132,8 +127,8 @@ class ImageBuilderMCP(InsightsMCP):
             architectures = list(openapi["components"]["schemas"]["ImageRequest"]["properties"]["architecture"]["enum"])
             architectures.sort()
 
-            self.logger.info("Supported image types: %s", image_types)
-            self.logger.info("Supported architectures: %s", architectures)
+            self.logger.debug("Supported image types: %s", image_types)
+            self.logger.debug("Supported architectures: %s", architectures)
         except Exception as e:  # pylint: disable=broad-exception-caught
             raise ValueError("Error getting openapi for image types and architectures") from e
         return image_types, architectures
@@ -185,64 +180,12 @@ class ImageBuilderMCP(InsightsMCP):
         Returns:
             List of distributions
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
 
         try:
-            distributions = await client.get("distributions")
+            distributions = await self.insights_client.get("distributions")
             return json.dumps(distributions)
         except Exception as e:  # pylint: disable=broad-exception-caught
             return f"Error getting distributions: {str(e)}"
-
-    def get_client_id(self, headers: dict[str, str]) -> str:
-        """Get the client ID preferably from the headers."""
-        client_id = self.insights_client.client_id or ""
-        if self.insights_client.oauth_enabled:
-            caller_headers_auth = headers.get("authorization")
-            if caller_headers_auth and caller_headers_auth.startswith("Bearer "):
-                # decode bearer token to get sid and use as client_id
-                token = caller_headers_auth.split("Bearer ", 1)[-1]
-                client_id = jwt.decode(token, options={"verify_signature": False}).get("sid")
-                self.logger.debug("Using sid from Bearer token as client_id: %s", client_id)
-        else:
-            client_id = headers.get("insights-client-id") or self.insights_client.client_id or ""
-            self.logger.debug("get_client_id request headers: %s", headers)
-
-        # explicit check for mypy
-        if not client_id:
-            raise ValueError("Client ID is required to access the Image Builder API")
-        return client_id
-
-    def get_client_secret(self, headers: dict[str, str]) -> str:
-        """Get the client secret preferably from the headers."""
-        client_secret = headers.get("insights-client-secret") or self.insights_client.client_secret
-        self.logger.debug("get_client_secret request headers: %s", headers)
-
-        if not client_secret:
-            raise ValueError("Client secret is required to access the Image Builder API")
-        return client_secret
-
-    def get_client(self, headers: dict[str, str]) -> InsightsClient:
-        """Get the InsightsClient instance for the current user."""
-        client_id = self.get_client_id(headers)
-        client = self.clients.get(client_id)
-        if not client:
-            client_secret = None
-            if not self.insights_client.oauth_enabled:
-                client_secret = self.get_client_secret(headers)
-            client = InsightsClient(
-                api_path="api/image-builder/v1",
-                client_id=client_id,
-                client_secret=client_secret,
-                mcp_transport=self.insights_client.mcp_transport,
-                oauth_enabled=self.insights_client.oauth_enabled,
-                headers={"X-ImageBuilder-ui": self.image_builder_mcp_client_id},
-                proxy_url=self.insights_client.proxy_url,
-            )
-            self.clients[client_id] = client
-        return client
 
     def get_openapi_synchronous(self) -> str:
         """
@@ -258,10 +201,6 @@ class ImageBuilderMCP(InsightsMCP):
         proxy_url = self.insights_client.proxy_url
         return httpx.get(f"{base_url}/{api_path}/openapi.json", timeout=60, proxy=proxy_url).text
 
-    def no_auth_error(self, e: httpx.HTTPStatusError | ValueError) -> str:
-        """Generate authentication error message based on transport type."""
-        return self.insights_client.client.no_auth_error(e)
-
     async def blueprint_compose(
         self, blueprint_uuid: Annotated[str, Field(description="The UUID of the blueprint to compose")]
     ) -> str:
@@ -276,18 +215,14 @@ class ImageBuilderMCP(InsightsMCP):
 
         Raises:
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
 
         try:
-            response = await client.post(f"blueprints/{blueprint_uuid}/compose")
+            response = await self.insights_client.post(f"blueprints/{blueprint_uuid}/compose")
         # avoid crashing the server so we'll stick to the broad exception catch
         except Exception as e:  # pylint: disable=broad-exception-caught
             return f"Error: {str(e)} in blueprint_compose {blueprint_uuid}"
 
-        response_str = "[INSTRUCTION] Use the tool get_compose_details to get the details of the compose\n"
+        response_str = "Use the tool get_compose_details to get the details of the compose\n"
         response_str += "like the current build status\n"
         response_str += "[ANSWER] Compose created successfully:"
         build_ids_str: list[str] = []
@@ -298,13 +233,16 @@ class ImageBuilderMCP(InsightsMCP):
                 f"Response: {json.dumps(response)}"
             )
 
+        if isinstance(response, str):
+            return response
+
         for build in response:
             if isinstance(build, dict) and "id" in build:
                 build_ids_str.append(f"UUID: {build['id']}")
             else:
                 build_ids_str.append(f"Invalid build object: {build}")
 
-        response_str += f"\n{json.dumps(build_ids_str)}"
+        response_str += f"\n{json.dumps(build_ids_str)}"  # noqa: F821
         response_str += "\nWe could double check the details or start the build/compose"
         return response_str
 
@@ -422,16 +360,13 @@ class ImageBuilderMCP(InsightsMCP):
         Returns:
             The response from the image-builder API
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+
         try:
             if os.environ.get("IMAGE_BUILDER_MCP_DISABLE_DESCRIPTION_WATERMARK", "").lower() != "true":
                 desc_parts = [data.get("description", ""), WATERMARK_CREATED]
                 data["description"] = "\n".join(filter(None, desc_parts))
             # TBD: programmatically check against openapi
-            response = await client.post("blueprints", json=data)
+            response = await self.insights_client.post("blueprints", json=data)
         # avoid crashing the server so we'll stick to the broad exception catch
         except Exception as e:  # pylint: disable=broad-exception-caught
             return f"Error: {str(e)}"
@@ -445,9 +380,10 @@ class ImageBuilderMCP(InsightsMCP):
                 f"Response: {json.dumps(response)}"
             )
 
-        response_str = "[INSTRUCTION] Use the tool get_blueprint_details to get the details of the blueprint\n"
+        response_str = "Use the tool get_blueprint_details to get the details of the blueprint\n"
         response_str += "or ask the user to start the build/compose with blueprint_compose\n"
-        response_str += f"Always show a link to the blueprint UI: {self.get_blueprint_url(client, response['id'])}\n"
+        response_str += "Always show a link to the blueprint UI: "
+        response_str += f"{self.get_blueprint_url(self.insights_client, response['id'])}\n"
         response_str += f"[ANSWER] Blueprint created successfully: {{'UUID': '{response['id']}'}}\n"
         response_str += "We could double check the details or start the build/compose"
         return response_str
@@ -471,17 +407,13 @@ class ImageBuilderMCP(InsightsMCP):
         Returns:
             The response from the image-builder API
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
 
         try:
             if os.environ.get("IMAGE_BUILDER_MCP_DISABLE_DESCRIPTION_WATERMARK", "").lower() != "true":
                 if all(wmark not in data.get("description", "") for wmark in [WATERMARK_CREATED, WATERMARK_UPDATED]):
                     desc_parts = [data.get("description", ""), WATERMARK_UPDATED]
                     data["description"] = "\n".join(filter(None, desc_parts))
-            response = await client.put(f"blueprints/{blueprint_uuid}", json=data)
+            response = await self.insights_client.put(f"blueprints/{blueprint_uuid}", json=data)
         except Exception as e:  # pylint: disable=broad-exception-caught
             return f"Error: {str(e)}"
 
@@ -497,9 +429,9 @@ class ImageBuilderMCP(InsightsMCP):
 
         # Build an instructional answer with a UI link like in create_blueprint
         instruction = (
-            "[INSTRUCTION] Use the tool get_blueprint_details to verify the updated blueprint or open the UI URL.\n"
+            "Use the tool get_blueprint_details to verify the updated blueprint or open the UI URL.\n"
             f"Always show a link to the blueprint UI: "
-            f"{self.get_blueprint_url(client, response.get('id', blueprint_uuid))}\n"
+            f"{self.get_blueprint_url(self.insights_client, response.get('id', blueprint_uuid))}\n"
         )
         answer = (
             f"[ANSWER] Blueprint updated successfully: {{'UUID': '{response.get('id', blueprint_uuid)}'}}\n"
@@ -523,11 +455,6 @@ class ImageBuilderMCP(InsightsMCP):
         🟢 CALL IMMEDIATELY - No information gathering required.
         """
 
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
-
         # workaround seen in LLama 3.3 70B Instruct
         if search_string == "null":
             search_string = None
@@ -538,7 +465,7 @@ class ImageBuilderMCP(InsightsMCP):
         try:
             # Make request with limit and offset parameters
             params = {"limit": limit, "offset": offset}
-            response = await client.get("blueprints", params=params)
+            response = await self.insights_client.get("blueprints", params=params)
 
             if isinstance(response, str):
                 return response
@@ -557,7 +484,7 @@ class ImageBuilderMCP(InsightsMCP):
                 data = {
                     "reply_id": i + offset,
                     "blueprint_uuid": blueprint["id"],
-                    "UI_URL": self.get_blueprint_url(client, blueprint["id"]),
+                    "UI_URL": self.get_blueprint_url(self.insights_client, blueprint["id"]),
                     "name": blueprint["name"],
                 }
 
@@ -568,7 +495,7 @@ class ImageBuilderMCP(InsightsMCP):
                 else:
                     ret.append(data)
 
-            intro = "[INSTRUCTION] Use the UI_URL to link to the blueprint\n"
+            intro = "Use the UI_URL to link to the blueprint\n"
             intro += self.paging_reminder
             return f"{intro}\n{json.dumps(ret)}"
         # avoid crashing the server so we'll stick to the broad exception catch
@@ -590,22 +517,18 @@ class ImageBuilderMCP(InsightsMCP):
         """
         if not blueprint_identifier:
             return "Error: a blueprint identifier is required"
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
 
         try:
             # If the identifier looks like a UUID, use it directly
             if len(blueprint_identifier) == 36 and blueprint_identifier.count("-") == 4:
-                response = await client.get(f"blueprints/{blueprint_identifier}")
+                response = await self.insights_client.get(f"blueprints/{blueprint_identifier}")
                 if isinstance(response, dict):
                     return json.dumps([response])
 
                 return json.dumps([{"error": "Unexpected list response", "data": response}])
-            ret = f"[INSTRUCTION] Error: {blueprint_identifier} is not a valid blueprint identifier,"
+            ret = f"Error: {blueprint_identifier} is not a valid blueprint identifier,"
             ret += "please use the UUID from get_blueprints\n"
-            ret += "[INSTRUCTION] retry calling get_blueprints\n\n"
+            ret += "retry calling get_blueprints\n\n"
             ret += f"[ANSWER] {blueprint_identifier} is not a valid blueprint identifier"
             return ret
         # avoid crashing the server so we'll stick to the broad exception catch
@@ -679,11 +602,9 @@ class ImageBuilderMCP(InsightsMCP):
         if limit <= 0:
             limit = self.default_response_size
         try:
-            client = self.get_client(get_http_headers())
-
             # Make request with limit and offset parameters
             params = {"limit": limit, "offset": offset}
-            response = await client.get("composes", params=params)
+            response = await self.insights_client.get("composes", params=params)
 
             if isinstance(response, str):
                 return response
@@ -699,22 +620,20 @@ class ImageBuilderMCP(InsightsMCP):
 
             ret: list[dict] = []
             for i, compose in enumerate(sorted_data, 1):
-                data = self._create_compose_data(compose, i + offset, client)
+                data = self._create_compose_data(compose, i + offset, self.insights_client)
 
                 # Apply search filter if provided
                 if self._should_include_compose(data, search_string):
                     ret.append(data)
 
             intro = (
-                "[INSTRUCTION] Present a bulleted list and use the blueprint_url to link to the "
+                "Present a bulleted list and use the blueprint_url to link to the "
                 "blueprint which created this compose\n"
             )
             intro += self.paging_reminder
             intro += "[ANSWER]\n"
             return f"{intro}\n{json.dumps(ret)}"
 
-        except ValueError as e:
-            return self.no_auth_error(e)
         # avoid crashing the server so we'll stick to the broad exception catch
         except Exception as e:  # pylint: disable=broad-exception-caught
             return f"Error: {str(e)}"
@@ -744,15 +663,11 @@ class ImageBuilderMCP(InsightsMCP):
         """
         if not compose_identifier:
             return "Error: Compose UUID is required"
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
 
         try:
             # If the identifier looks like a UUID, use it directly
             if len(compose_identifier) == 36 and compose_identifier.count("-") == 4:
-                response = await client.get(f"composes/{compose_identifier}")
+                response = await self.insights_client.get(f"composes/{compose_identifier}")
                 if isinstance(response, str):
                     return response
 
@@ -767,10 +682,10 @@ class ImageBuilderMCP(InsightsMCP):
                 response["compose_uuid"] = compose_identifier
             else:
                 ret = (
-                    f"[INSTRUCTION] Error: {compose_identifier} is not a valid compose identifier,"
+                    f"Error: {compose_identifier} is not a valid compose identifier,"
                     "please use the UUID from get_composes\n"
                 )
-                ret += "[INSTRUCTION] retry calling get_composes\n\n"
+                ret += "retry calling get_composes\n\n"
                 ret += f"[ANSWER] {compose_identifier} is not a valid compose identifier"
                 return ret
 
@@ -781,7 +696,7 @@ class ImageBuilderMCP(InsightsMCP):
 
             if download_url and upload_target == "oci.objectstorage":
                 intro += """
-[INSTRUCTION] Leave the URL as code block so the user can copy and paste it.
+Leave the URL as code block so the user can copy and paste it.
 
 To run the image copy the link below and follow the steps below:
 
@@ -796,7 +711,7 @@ To run the image copy the link below and follow the steps below:
 """
             elif image_name and upload_target == "gcp":
                 intro += f"""
-[INSTRUCTION] present the two code blocks with their respective explanations below to the user.
+present the two code blocks with their respective explanations below to the user.
 
 To launch this image, contact your org admin to adjust your launch permissions.
 

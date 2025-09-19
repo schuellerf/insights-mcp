@@ -118,6 +118,38 @@ def get_free_port() -> int:
     return port
 
 
+def build_server_args(transport: str, toolset: str | None = None, readonly: bool = False) -> List[str]:
+    """Build command line arguments for the server.
+
+    Args:
+        transport: Transport type ('http', 'sse', or 'stdio')
+        toolset: Toolset to use (e.g., 'all', 'image-builder', 'inventory', 'image-builder,inventory')
+        readonly: If True, only register read-only tools
+
+    Returns:
+        List of command line arguments
+    """
+    base_args = []
+
+    # Add toolset argument if specified
+    if toolset is not None:
+        base_args.extend(["--toolset", toolset])
+
+    # Add readonly argument if specified
+    if readonly:
+        base_args.append("--readonly")
+
+    # Add transport-specific arguments
+    if transport == "stdio":
+        base_args.append("stdio")
+    elif transport == "sse":
+        base_args.extend(["sse", "--host", "127.0.0.1"])  # port will be added later
+    else:  # http
+        base_args.extend(["http", "--host", "127.0.0.1"])  # port will be added later
+
+    return base_args
+
+
 def get_server_url_and_port(transport: str) -> tuple[str, int]:
     """Get server URL and port for the given transport type."""
     port = get_free_port()
@@ -143,25 +175,10 @@ def _server_worker(
         # Mock sys.argv to simulate command line arguments
         original_argv = sys.argv.copy()
         try:
-            base_args = ["insights_mcp"]
-
-            # Add toolset argument if specified
-            if toolset is not None:
-                base_args.extend(["--toolset", toolset])
-
-            # Add readonly argument if specified
-            if readonly:
-                base_args.append("--readonly")
-
-            # Add transport-specific arguments
-            if transport == "stdio":
-                base_args.append("stdio")
-            elif transport == "sse":
-                base_args.extend(["sse", "--host", "127.0.0.1", "--port", str(port)])
-            else:  # http
-                base_args.extend(["http", "--host", "127.0.0.1", "--port", str(port)])
-
-            sys.argv = base_args
+            args = build_server_args(transport, toolset, readonly)
+            if transport != "stdio":
+                args.extend(["--port", str(port)])
+            sys.argv = ["insights-mcp"] + args
 
             # Import and call main
             # pylint: disable=import-outside-toplevel
@@ -181,7 +198,7 @@ def _server_worker(
 
 
 def start_insights_mcp_server(
-    transport: str, timeout: int = 30, toolset: str | None = None, readonly: bool = False
+    transport: str, toolset: str | None = None, readonly: bool = False, timeout: int = 30
 ) -> tuple[str, multiprocessing.Process]:
     """Start the insights MCP server with specified transport type.
 

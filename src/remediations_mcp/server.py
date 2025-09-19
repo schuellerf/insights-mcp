@@ -10,15 +10,15 @@ from typing import Any
 from insights_mcp.mcp import InsightsMCP
 
 mcp = InsightsMCP(
-    name="Insights Remediations MCP Server",
+    name="Red Hat Insights Remediations MCP Server",
     toolset_name="remediations",
     api_path="api/remediations/v1",
-    instructions="""
-    This server provides tools to create Ansible Remediation Playbooks to fix systems connected to Insights.
+    instructions="""This server provides tools to create Ansible Remediation Playbooks to fix systems
+    connected to Red Hat Insights.
     You can create playbooks for different issues, such as vulnerability mitigation
     or applying InsightsAdvisor recommendations.
 
-    [INSTRUCTION] Be communicative. Ask user if they want to get a link to the playbook or to get the YAML content.
+    Ask user if they want to get a link to the playbook or to get the YAML content.
     Playbooks in YAML format MUST be returned as is without any changes.
     """,
 )

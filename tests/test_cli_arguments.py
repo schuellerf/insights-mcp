@@ -4,51 +4,12 @@ This module tests the --toolset command line argument to ensure that the correct
 set of tools is available based on the toolset configuration.
 """
 
-import asyncio
-from typing import Any, Dict, List, Set
+from typing import Dict, Set
 
 import pytest
-from llama_index.tools.mcp import BasicMCPClient, McpToolSpec
+from llama_index.tools.mcp import McpToolSpec
 
-from tests.utils import cleanup_server_process, start_insights_mcp_server
-
-
-def get_mcp_tools_with_toolset(transport: str, toolset: str | None = None, readonly: bool = False) -> List[Any]:
-    """Get MCP tools for a specific transport and toolset configuration.
-
-    Args:
-        transport: Transport type ('http', 'sse', or 'stdio')
-        toolset: Toolset to use (e.g., 'all', 'image-builder', 'inventory')
-        readonly: If True, only register read-only tools
-
-    Returns:
-        List of MCP tools
-    """
-    server_url, server_process = start_insights_mcp_server(transport, toolset=toolset, readonly=readonly)
-
-    try:
-        if server_url == "stdio":
-            # For stdio, use subprocess approach with toolset
-            args = ["-m", "insights_mcp.server"]
-            if toolset is not None:
-                args.extend(["--toolset", toolset])
-            if readonly:
-                args.append("--readonly")
-            args.append("stdio")
-            client = BasicMCPClient("python", args=args)
-        else:
-            # For HTTP/SSE, connect to running server
-            client = BasicMCPClient(server_url)
-
-        tool_spec = McpToolSpec(client=client)
-
-        async def _fetch():
-            return await tool_spec.to_tool_list_async()
-
-        return asyncio.run(_fetch())
-
-    finally:
-        cleanup_server_process(server_process)
+from tests.conftest import MCPTestServerConfig
 
 
 class TestCliArguments:
@@ -94,11 +55,9 @@ class TestCliArguments:
         },
     }
 
-    @pytest.mark.parametrize("transport", ["stdio"])
-    def test_default_toolset_includes_all_tools(self, transport: str):
+    def test_default_toolset_includes_all_tools(self, mcp_test_client_stdio):
         """Test that when --toolset is not specified, all tools are available."""
-        # Test with no toolset specified (should default to "all")
-        tools = get_mcp_tools_with_toolset(transport, toolset=None)
+        tools = McpToolSpec(client=mcp_test_client_stdio).to_tool_list()
         tool_names = {getattr(t.metadata, "name", "") for t in tools}
 
         # Should include tools from all toolsets
@@ -121,10 +80,12 @@ class TestCliArguments:
         missing_tools = expected_core_tools - tool_names
         assert not missing_tools, f"Missing expected tools: {missing_tools}. Available: {tool_names}"
 
-    @pytest.mark.parametrize("transport", ["stdio"])
-    def test_image_builder_toolset_only(self, transport: str):
+    @pytest.mark.parametrize(
+        "mcp_test_client_stdio", [MCPTestServerConfig(transport="stdio", toolset="image-builder")], indirect=True
+    )
+    def test_image_builder_toolset_only(self, mcp_test_client_stdio):
         """Test that when --toolset=image-builder, only image-builder tools are available."""
-        tools = get_mcp_tools_with_toolset(transport, toolset="image-builder")
+        tools = McpToolSpec(client=mcp_test_client_stdio).to_tool_list()
         tool_names = {getattr(t.metadata, "name", "") for t in tools}
 
         # Should only have image-builder tools
@@ -145,10 +106,12 @@ class TestCliArguments:
         missing_tools = expected_tools - tool_names
         assert not missing_tools, f"Missing expected image-builder tools: {missing_tools}"
 
-    @pytest.mark.parametrize("transport", ["stdio"])
-    def test_inventory_toolset_only(self, transport: str):
+    @pytest.mark.parametrize(
+        "mcp_test_client_stdio", [MCPTestServerConfig(transport="stdio", toolset="inventory")], indirect=True
+    )
+    def test_inventory_toolset_only(self, mcp_test_client_stdio):
         """Test that when --toolset=inventory, only inventory tools are available."""
-        tools = get_mcp_tools_with_toolset(transport, toolset="inventory")
+        tools = McpToolSpec(client=mcp_test_client_stdio).to_tool_list()
         tool_names = {getattr(t.metadata, "name", "") for t in tools}
 
         # Should only have inventory tools
@@ -167,10 +130,14 @@ class TestCliArguments:
         missing_tools = expected_tools - tool_names
         assert not missing_tools, f"Missing expected inventory tools: {missing_tools}"
 
-    @pytest.mark.parametrize("transport", ["stdio"])
-    def test_combined_toolsets(self, transport: str):
+    @pytest.mark.parametrize(
+        "mcp_test_client_stdio",
+        [MCPTestServerConfig(transport="stdio", toolset="image-builder,inventory")],
+        indirect=True,
+    )
+    def test_combined_toolsets(self, mcp_test_client_stdio):
         """Test that when --toolset=image-builder,inventory, both toolsets are available."""
-        tools = get_mcp_tools_with_toolset(transport, toolset="image-builder, inventory")
+        tools = McpToolSpec(client=mcp_test_client_stdio).to_tool_list()
         tool_names = {getattr(t.metadata, "name", "") for t in tools}
 
         # Should have both image-builder and inventory tools
@@ -196,11 +163,14 @@ class TestCliArguments:
         missing_tools = expected_tools - tool_names
         assert not missing_tools, f"Missing expected tools: {missing_tools}"
 
-    @pytest.mark.parametrize("transport", ["stdio"])
-    def test_explicit_all_toolset(self, transport: str):
+    @pytest.mark.parametrize(
+        "mcp_test_client_stdio", [MCPTestServerConfig(transport="stdio", toolset="all")], indirect=True
+    )
+    def test_explicit_all_toolset(self, mcp_test_client_stdio):
         """Test that when --toolset=all, all tools are available (same as default)."""
-        tools_default = get_mcp_tools_with_toolset(transport, toolset=None)
-        tools_explicit_all = get_mcp_tools_with_toolset(transport, toolset="all")
+        tools_default = McpToolSpec(client=mcp_test_client_stdio).to_tool_list()
+        # TBD, we would need two instances of mcp_test_client_stdio for this test!!
+        tools_explicit_all = McpToolSpec(client=mcp_test_client_stdio).to_tool_list()
 
         tool_names_default = {getattr(t.metadata, "name", "") for t in tools_default}
         tool_names_explicit_all = {getattr(t.metadata, "name", "") for t in tools_explicit_all}
@@ -211,11 +181,13 @@ class TestCliArguments:
             f"Default: {tool_names_default}, Explicit all: {tool_names_explicit_all}"
         )
 
-    @pytest.mark.parametrize("transport", ["stdio"])
-    def test_readonly_flag_filters_tools(self, transport: str):
+    @pytest.mark.parametrize(
+        "mcp_test_client_stdio", [MCPTestServerConfig(transport="stdio", readonly=True)], indirect=True
+    )
+    def test_readonly_flag_filters_tools(self, mcp_test_client_stdio):
         """Test that --readonly flag filters out non-readonly tools."""
         # Get some toolsets with readonly flag to test
-        tools = get_mcp_tools_with_toolset(transport, toolset="image-builder,vulnerability,remediations", readonly=True)
+        tools = McpToolSpec(client=mcp_test_client_stdio).to_tool_list()
         tool_names = {getattr(t.metadata, "name", "") for t in tools}
 
         # Readonly tools that should be present

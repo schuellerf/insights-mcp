@@ -110,7 +110,7 @@ class TestGetComposeDetails:
             result = await imagebuilder_mcp_server.get_compose_details(compose_identifier=invalid_uuid)
 
             # Should return error message about invalid identifier
-            assert "[INSTRUCTION] Error:" in result
+            assert "Error:" in result
             assert "is not a valid compose identifier" in result
             assert "please use the UUID from get_composes" in result
 

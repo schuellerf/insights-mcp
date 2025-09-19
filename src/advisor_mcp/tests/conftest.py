@@ -7,23 +7,24 @@ from unittest.mock import patch
 
 import pytest
 
-from advisor_mcp import AdvisorMCP
-
 # Import directly from tests since pytest now knows where to find packages
+from advisor_mcp.server import AdvisorMCP
 from tests.conftest import (
     TEST_CLIENT_ID,
     TEST_CLIENT_SECRET,
     assert_api_error_result,
     assert_empty_response,
-    assert_instruction_in_result,
-    create_mcp_server,
+    create_mcp_server_low_level,
     create_mock_client,
     default_response_size,
     guardian_agent,
-    mcp_server_url,
-    mcp_tools,
+    inmemory_test_mcp_server,
+    inmemory_test_mcp_server_run_in_process,
+    mcp_test_client_network,
+    mcp_test_client_stdio,
+    mcp_tools_network,
+    mcp_tools_stdio,
     mock_http_headers,
-    setup_mcp_mock,
     test_agent,
     test_client_credentials,
     verbose_logger,
@@ -69,11 +70,17 @@ def get_default_hosts_details_params(rule_id=TEST_RULE_ID, **overrides):
 
 
 @pytest.fixture
-def advisor_mcp_server():
-    """Create Advisor MCP server for tests."""
-    return create_mcp_server(AdvisorMCP)
+# pylint: disable=redefined-outer-name
+async def advisor_mcp_server(advisor_mock_client):
+    """Create Advisor MCP server for tests using the unified approach.
+
+    This fixture uses the create_mcp_test_server_factory with advisor toolset only.
+    For comprehensive testing with all toolsets, use the create_mcp_test_server fixture instead.
+    """
+    return create_mcp_server_low_level(AdvisorMCP, advisor_mock_client)
 
 
+# pylint: disable=redefined-outer-name
 @pytest.fixture
 def advisor_mock_client():
     """Create a mock InsightsClient for Advisor tests."""
@@ -81,7 +88,8 @@ def advisor_mock_client():
 
 
 @contextmanager
-def setup_advisor_mock(mcp_server, mock_client, mock_response=None, side_effect=None):
+# pylint: disable=redefined-outer-name
+def setup_advisor_mock(advisor_mcp_server, mock_client, mock_response=None, side_effect=None):
     """Context manager for setting up Advisor mock patterns.
 
     Advisor MCP uses a different architecture than Image Builder MCP:
@@ -101,7 +109,7 @@ def setup_advisor_mock(mcp_server, mock_client, mock_response=None, side_effect=
         mock_client.put.return_value = mock_response
 
     # Mock the insights_client directly on the server instance
-    with patch.object(mcp_server, "insights_client", mock_client):
+    with patch.object(advisor_mcp_server, "insights_client", mock_client):
         yield None  # No headers needed for advisor architecture
 
 
@@ -109,20 +117,21 @@ def setup_advisor_mock(mcp_server, mock_client, mock_response=None, side_effect=
 __all__ = [
     "assert_api_error_result",
     "assert_empty_response",
-    "assert_instruction_in_result",
     "advisor_mcp_server",
     "advisor_mock_client",
-    "create_mcp_server",
     "create_mock_client",
     "default_response_size",
     "get_default_active_rules_params",
     "get_default_hosts_details_params",
     "guardian_agent",
-    "mcp_server_url",
-    "mcp_tools",
+    "inmemory_test_mcp_server",
+    "inmemory_test_mcp_server_run_in_process",
+    "mcp_test_client_stdio",
+    "mcp_test_client_network",
+    "mcp_tools_network",
+    "mcp_tools_stdio",
     "mock_http_headers",
     "setup_advisor_mock",
-    "setup_mcp_mock",
     "test_agent",
     "test_client_credentials",
     "TEST_CLIENT_ID",

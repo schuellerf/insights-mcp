@@ -135,7 +135,7 @@ class InsightsClientBase(httpx.AsyncClient):
             Detailed authentication error message with setup instructions
         """
         base_message = (
-            "[INSTRUCTION] There seems to be a problem with the request. "
+            "There seems to be a problem with the request. "
             "Without asking the user, immediately call get_insights_mcp_version() to check "
             "if we are on the latest release. ALSO call get_all_access() to check "
             "if it's an authentication problem or just missing permissions.\n"
@@ -183,7 +183,7 @@ class InsightsClientBase(httpx.AsyncClient):
             Detailed permissions error message with access request instructions
         """
         return (
-            f"[INSTRUCTION] Use get_insights_mcp_version() to check if we are on the latest release. "
+            f"Use get_insights_mcp_version() to check if we are on the latest release. "
             "Also use rbac__get_all_access() to list all current permissions"
             " and help the user find out which permissions might be missing."
             "Then the user should go to [https://console.redhat.com/iam/user-access/overview]"
@@ -313,6 +313,8 @@ class InsightsClient:  # pylint: disable=too-many-instance-attributes
         mcp_transport: MCP transport type for error message customization
     """
 
+    _closed: bool = False
+
     def __init__(  # pylint: disable=too-many-arguments
         self,
         *,
@@ -327,7 +329,7 @@ class InsightsClient:  # pylint: disable=too-many-instance-attributes
         mcp_transport: str | None = None,  # TODO: get rid of mcp_transport in client
     ):
         self.logger = getLogger("InsightsClient")
-        self.logger.info("Initializing insights client")
+        self.logger.info("Initializing insights client for %s", api_path)
         # NOTE: probably we don't need to set all these variables,
         # but set them before refactor of ImageBuilderMCP
         self.insights_base_url = base_url
@@ -358,6 +360,8 @@ class InsightsClient:  # pylint: disable=too-many-instance-attributes
         # merge headers with client headers
         if headers:
             self.client.headers.update(headers)
+
+        self._closed = False
 
     async def get(
         self,
@@ -424,3 +428,45 @@ class InsightsClient:  # pylint: disable=too-many-instance-attributes
         client = self.client_noauth if noauth else self.client
         url = f"{self.insights_base_url}/{self.api_path}/{endpoint}"
         return await client.make_request(client.put, url=url, json=json, **kwargs)
+
+    async def aclose(self) -> None:
+        """Properly close all HTTP clients to avoid event loop cleanup errors.
+
+        This method ensures that all httpx AsyncClient instances are properly
+        closed before the event loop shuts down, preventing RuntimeError during tests.
+        """
+        if self._closed:
+            return
+        self.logger.info("Closing insights client for %s", self.api_path)
+        try:
+            # Close authenticated client if it's an httpx client
+            if hasattr(self.client, "aclose"):
+                await self.client.aclose()
+            else:
+                self.logger.info("No authenticated client to close")
+
+            # Close non-authenticated client
+            if hasattr(self.client_noauth, "aclose"):
+                await self.client_noauth.aclose()
+            else:
+                self.logger.info("No non-authenticated client to close")
+            self._closed = True
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # Log but don't raise - we're in cleanup
+            if hasattr(self, "logger"):
+                self.logger.debug("Error closing HTTP clients: %s", e)
+
+    async def __aenter__(self):
+        """Support async context manager usage."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Ensure clients are closed when exiting context."""
+        await self.aclose()
+
+    def __del__(self):
+        """Attempt to warn about unclosed clients."""
+        if not self._closed and hasattr(self, "logger"):
+            self.logger.debug(
+                "InsightsClient was not explicitly closed. Consider using 'async with' or calling aclose()"
+            )

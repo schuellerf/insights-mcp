@@ -11,11 +11,10 @@ from pydantic import Field
 from insights_mcp.mcp import InsightsMCP
 
 mcp = InsightsMCP(
-    name="Insights RBAC MCP Server",
+    name="Red Hat Insights RBAC MCP Server",
     toolset_name="rbac",
     api_path="api/rbac/v1",
-    instructions="""
-    This server provides tools to manage Role-Based Access Control (RBAC) for Red Hat insights services.
+    instructions="""This server provides tools to manage Role-Based Access Control (RBAC) for Red Hat insights services.
     You can get access information, manage roles, permission policies, and conditional policies.
 
     Insights RBAC requires correct RBAC permissions to be able to use the tools. Ensure that your

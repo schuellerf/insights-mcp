@@ -59,7 +59,7 @@ Each module's `conftest.py` re-exports fixtures from the top-level tests:
 ```python
 from tests.conftest import (
     mcp_tools,
-    mcp_server_url,
+    test_mcp_server_background_process,
     # ... other fixtures
 )
 ```
@@ -70,7 +70,7 @@ from tests.conftest import (
    ```python
    from tests.conftest import (
        mcp_tools,
-       mcp_server_url,
+       test_mcp_server_background_process,
        # ... other needed fixtures
    )
    ```

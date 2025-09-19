@@ -34,6 +34,16 @@ MCPS: list[InsightsMCP] = [
 ]
 
 
+def reset_all_mcp_instances():
+    """Reset all MCP instances to clear registered tools.
+
+    Used in tests to prevent duplicate tool registration warnings.
+    """
+    for mcp in MCPS:
+        mcp.reset_tools()
+
+
+# pylint: disable=too-many-instance-attributes
 class InsightsMCPServer(FastMCP):
     """Unified MCP server that mounts multiple Red Hat Insights service servers.
 
@@ -81,6 +91,7 @@ class InsightsMCPServer(FastMCP):
         self.proxy_url = proxy_url
         self.oauth_enabled = oauth_enabled
         self.mcp_transport = mcp_transport
+        self.logger = logging.getLogger("InsightsMCPServer")
 
     def register_mcps(self, allowed_mcps: list[str], readonly: bool = False):
         """Register and mount allowed MCP servers.
@@ -89,6 +100,7 @@ class InsightsMCPServer(FastMCP):
             allowed_mcps: List of MCP server names to register and mount
             readonly: If True, only register read-only tools
         """
+
         for mcp in MCPS:
             if mcp.toolset_name not in allowed_mcps:
                 continue
@@ -111,6 +123,38 @@ class InsightsMCPServer(FastMCP):
             mcp.remove_non_readonly_tools(readonly=readonly)
 
             self.mount(mcp, prefix=f"{mcp.toolset_name}_")
+
+    def get_mcp(self, toolset_name: str) -> InsightsMCP | None:
+        """Return mounted MCP instance by toolset name if available.
+
+        Uses FastMCP's mounted server registry to avoid duplicating state.
+        This is primarily for tests that need access to the underlying
+        toolset instance (e.g., to patch its insights_client).
+        """
+        # FastMCP keeps mounted servers in managers; consult the tool manager directly
+        mounted_servers = self._tool_manager._mounted_servers  # pylint: disable=protected-access
+        for mounted in mounted_servers:
+            self.logger.info("Mounted server: %s", mounted)
+            prefix = mounted.prefix or ""
+            # Normalize FastMCP-style prefixes (e.g., "vulnerability_" -> "vulnerability")
+            normalized = prefix.rstrip("_")
+            self.logger.info("Mounted server prefix: %s (normalized: %s)", prefix, normalized)
+            if normalized == toolset_name:
+                server = mounted.server
+                assert isinstance(server, InsightsMCP)
+                return server
+        self.logger.error("No mounted MCP instance found for toolset name: %s", toolset_name)
+        self.logger.error("Mounted servers: %s", mounted_servers)
+        return None
+
+    async def aclose_clients(self) -> None:
+        """Close all InsightsClient instances held by registered MCP toolsets.
+
+        This ensures event loop resources are released cleanly after tests or
+        when shutting down the server in async contexts.
+        """
+        for mcp in MCPS:
+            await mcp.aclose()
 
 
 def get_instructions(allowed_mcps: list[str]) -> str:
@@ -181,8 +225,13 @@ def get_latest_release_tag() -> str:
     """Get the latest release tag from github."""
     # https://github.com/RedHatInsights/insights-mcp/releases
     # rather use the api to get the latest release tag
-    response = requests.get("https://api.github.com/repos/RedHatInsights/insights-mcp/releases/latest", timeout=30)
-    response.raise_for_status()
+    try:
+        response = requests.get("https://api.github.com/repos/RedHatInsights/insights-mcp/releases/latest", timeout=30)
+        response.raise_for_status()
+    except Exception as e:  # pylint: disable=broad-except
+        logger = logging.getLogger("InsightsMCPServer")
+        logger.error("Error getting latest release tag: %s", e)
+        return "unknown"
     return response.json()["tag_name"]
 
 
@@ -234,6 +283,123 @@ def get_insights_mcp_version() -> str:
     )
 
 
+def setup_logging(debug: bool = False, toolset_list: list[str] | None = None) -> None:
+    """Configure logging for all MCP components.
+
+    This function provides centralized logging configuration that dynamically
+    discovers and configures loggers for all loaded toolsets, eliminating
+    hardcoded logger names and providing consistent logging across components.
+
+    Args:
+        debug: Enable debug logging if True
+        toolset_list: List of toolsets to configure logging for
+    """
+    if not debug:
+        return
+
+    # Configure root logger for debug output
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s - %(levelname)s - %(message)s")
+
+    # Configure core loggers
+    core_loggers = ["InsightsMCPServer", "InsightsClientBase", "InsightsClient", "ImageBuilderOAuthMiddleware"]
+
+    for logger_name in core_loggers:
+        logging.getLogger(logger_name).setLevel(logging.DEBUG)
+
+    # Dynamically configure toolset loggers
+    if toolset_list:
+        for mcp in MCPS:
+            if mcp.toolset_name in toolset_list:
+                # Try to get logger name from the MCP class
+                # Most toolsets use their class name as logger name
+                logger_name = mcp.__class__.__name__
+                logging.getLogger(logger_name).setLevel(logging.DEBUG)
+
+                # Also try common patterns for logger names
+                alt_logger_names = [
+                    f"{mcp.toolset_name.title().replace('-', '')}MCP",
+                    f"{mcp.toolset_name}_mcp",
+                    mcp.toolset_name,
+                ]
+
+                for alt_name in alt_logger_names:
+                    logging.getLogger(alt_name).setLevel(logging.DEBUG)
+
+
+def create_mcp_server(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    toolset_list: list[str] | None = None,
+    readonly: bool = False,
+    stage: bool = False,
+    debug: bool = False,
+    transport: str = "stdio",
+    client_id: str | None = None,
+    client_secret: str | None = None,
+    refresh_token: str | None = None,
+    proxy_url: str | None = None,
+    oauth_enabled: bool = False,
+) -> InsightsMCPServer:
+    """Create and configure an MCP server instance.
+
+    This function creates an InsightsMCPServer instance with the specified configuration
+    and registers the requested toolsets. The server is returned without being started,
+    allowing tests to attach to stdio or other transports as needed.
+
+    Args:
+        toolset_list: List of toolset names to register. If None, defaults to all toolsets.
+        readonly: If True, only register read-only tools
+        stage: If True, use stage API instead of production API
+        debug: If True, enable debug logging
+        transport: Transport type for error handling ("stdio", "http", "sse")
+        client_id: OAuth client ID for authentication
+        client_secret: OAuth client secret for authentication
+        refresh_token: OAuth refresh token for authentication
+        proxy_url: Optional proxy URL for requests
+        oauth_enabled: Whether OAuth authentication is enabled
+
+    Returns:
+        Configured InsightsMCPServer instance ready to run
+    """
+    # Default to all toolsets if none specified
+    logger = logging.getLogger("InsightsMCPServer")
+
+    if toolset_list is None:
+        toolset_list = [mcp.toolset_name for mcp in MCPS]
+
+    # Setup logging using the centralized function
+    setup_logging(debug=debug, toolset_list=toolset_list)
+
+    if debug:
+        logger.info("Debug mode enabled")
+
+    logger.warning(
+        "Creating Insights MCP %s (%s) with toolsets: %s",
+        __version__,
+        transport,
+        ", ".join(toolset_list),
+    )
+
+    instructions = get_instructions(toolset_list)
+
+    # Create the MCP server
+    mcp_server = InsightsMCPServer(
+        base_url=INSIGHTS_BASE_URL if not stage else os.getenv("INSIGHTS_BASE_URL", "Please provide INSIGHTS_BASE_URL"),
+        client_id=client_id,
+        client_secret=client_secret,
+        refresh_token=refresh_token,
+        proxy_url=proxy_url,
+        oauth_enabled=oauth_enabled,
+        mcp_transport=transport,
+        instructions=instructions,
+    )
+
+    mcp_server.register_mcps(toolset_list, readonly=readonly)
+
+    # Register the version checking tool
+    mcp_server.tool(get_insights_mcp_version, annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+
+    return mcp_server
+
+
 def main():  # pylint: disable=too-many-statements,too-many-locals
     """Main entry point for the Insights MCP server."""
     available_toolsets = f"all, {', '.join(mcp.toolset_name for mcp in MCPS)}"
@@ -282,20 +448,6 @@ def main():  # pylint: disable=too-many-statements,too-many-locals
             print("hint: INSIGHTS_STAGE_PROXY_URL=http://yoursquidproxy…:3128")
             sys.exit(1)
 
-    logger = logging.getLogger("InsightsMCPServer")
-
-    if args.debug:  # FIXME: make common logging setup
-        # Configure root logger for debug output
-        logging.basicConfig(level=logging.DEBUG, format="%(name)s - %(levelname)s - %(message)s")
-
-        # Set specific logger levels
-        logging.getLogger("ImageBuilderMCP").setLevel(logging.DEBUG)
-        logging.getLogger("InsightsClientBase").setLevel(logging.DEBUG)
-        logging.getLogger("InsightsClient").setLevel(logging.DEBUG)
-        logging.getLogger("ImageBuilderOAuthMiddleware").setLevel(logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
-        logger.info("Debug mode enabled")
-
     oauth_enabled = os.getenv("OAUTH_ENABLED", "false").lower() == "true"
     toolset = args.toolset or os.getenv("INSIGHTS_TOOLSET", "all")
 
@@ -304,32 +456,21 @@ def main():  # pylint: disable=too-many-statements,too-many-locals
     else:
         toolset_list = [t.strip() for t in toolset.split(",")]
 
-    logger.warning(
-        "Starting Insights MCP %s (%s) with toolsets: %s",
-        __version__,
-        args.transport,
-        ", ".join(toolset_list),
-    )
-
-    instructions = get_instructions(toolset_list)
-
-    # Create and run the MCP server
-    mcp_server = InsightsMCPServer(
-        base_url=INSIGHTS_BASE_URL if not args.stage else os.getenv("INSIGHTS_BASE_URL"),
+    # Create the MCP server using the new function
+    mcp_server = create_mcp_server(
+        toolset_list=toolset_list,
+        readonly=args.readonly,
+        stage=args.stage,
+        debug=args.debug,
+        transport=args.transport,
         client_id=client_id,
         client_secret=client_secret,
         refresh_token=os.getenv("INSIGHTS_REFRESH_TOKEN"),
         proxy_url=proxy_url,
         oauth_enabled=oauth_enabled,
-        mcp_transport=args.transport,
-        instructions=instructions,
     )
 
-    mcp_server.register_mcps(toolset_list, readonly=args.readonly)
-
-    # Register the version checking tool
-    mcp_server.tool(get_insights_mcp_version, annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
-
+    # Run the server based on transport type
     if args.transport == "sse":
         mcp_server.run(transport="sse", host=args.host, port=args.port)
     elif args.transport == "http":
@@ -345,6 +486,7 @@ def main():  # pylint: disable=too-many-statements,too-many-locals
             )
             oauth_client = os.getenv("OAUTH_CLIENT")
             if not oauth_client:
+                logger = logging.getLogger("InsightsMCPServer")
                 logger.fatal("OAUTH_CLIENT environment variable is required for OAuth-enabled HTTP transport")
                 sys.exit(1)
 

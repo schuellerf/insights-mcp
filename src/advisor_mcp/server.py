@@ -12,9 +12,7 @@ from insights_mcp.mcp import InsightsMCP
 
 
 class AdvisorMCP(InsightsMCP):
-    """MCP server for Red Hat Insights Advisor Recommendations integration.
-
-    This server provides tools for querying Red Hat Insights
+    """This server provides tools for querying Red Hat Insights
     Advisor Recommendations, which identify configuration issues that might negatively
     affect the availability, stability, performance, or security of your RHEL systems.
     Includes recommendation discovery, host impact analysis, and detailed information retrieval.
@@ -23,7 +21,7 @@ class AdvisorMCP(InsightsMCP):
     def __init__(self):
         self.logger = logging.getLogger("AdvisorMCP")
         super().__init__(
-            name="Advisor Recommendations MCP Server",
+            name="Red Hat Insights Advisor Recommendations MCP Server",
             toolset_name="advisor",
             api_path="api/insights/v1",
             # TODO: check if role should be added to failed http responses.

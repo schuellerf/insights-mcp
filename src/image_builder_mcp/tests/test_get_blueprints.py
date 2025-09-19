@@ -60,7 +60,6 @@ class TestGetBlueprints:
             imagebuilder_mock_client.get.assert_called_once_with("blueprints", params={"limit": 7, "offset": 0})
 
             # Parse the result
-            assert result.startswith("[INSTRUCTION]")
             assert "Use the UI_URL to link to the blueprint" in result
             # check paging reminder
             assert "There could be more entries" in result
@@ -234,7 +233,5 @@ class TestGetBlueprints:
             # Should use default response size (10)
             imagebuilder_mock_client.get.assert_called_once_with("blueprints", params={"limit": 10, "offset": 0})
 
-            # Should return result
-            assert "[INSTRUCTION]" in result
             # check paging reminder
             assert "There could be more entries" in result

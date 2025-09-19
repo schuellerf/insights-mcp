@@ -13,8 +13,8 @@
 
 ## vulnerability
 - `get_openapi`: Get Red Hat Insights Vulnerability OpenAPI specification in JSON format.
-- `get_cves`: Get list of CVEs affecting the account.
-- `get_cve`: Get details about specific CVE.
+- `get_cves`: Get list of Common Vulnerabilities and Exposures (CVEs) affecting the account.
+- `get_cve`: Get details about specific Common Vulnerabilities and Exposures (CVE).
 - `get_cve_systems`: Get list of systems affected by a given CVE.
 - `get_system_cves`: Get list of CVEs affecting a given system.
 - `get_systems`: Get list of systems in Insights Vulnerability inventory.

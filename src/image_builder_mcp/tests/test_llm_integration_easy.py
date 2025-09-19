@@ -139,6 +139,7 @@ class TestLLMIntegrationEasy:
         answered_with_question = None
         # if this fails that's ok, we can continue
         try:
+            verbose_logger.info("🔎 Criteria: %s", contains_question.criteria)
             verbose_logger.info("🤔 Checking response with guardian agent %s…", guardian_agent.model_id)
 
             # Measure once to get access to explanation and avoid double LLM call
@@ -153,6 +154,7 @@ class TestLLMIntegrationEasy:
                 f"Reason: {contains_question.reason}"
             )
             verbose_logger.info("✓ LLM %s correctly answered with a question", llm_config["name"])
+
         except AssertionError as e:
             answered_with_question = e
             verbose_logger.info("Question test case failed, continuing...")
@@ -169,7 +171,11 @@ class TestLLMIntegrationEasy:
 
         # Check if relevant tools were selected
         tool_names = [tool.name for tool in tools_executed]
-        expected_tool_names = ["image-builder__get_composes", "image-builder__get_compose_details"]
+        expected_tool_names = [
+            "image-builder__get_composes",
+            "image-builder__get_compose_details",
+            "get_insights_mcp_version",
+        ]
 
         found_relevant = any(tool in tool_names for tool in expected_tool_names)
 

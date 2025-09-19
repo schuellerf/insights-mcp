@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 
 def assert_mcp_tool_descriptions_and_annotations(
-    mcp_tools,
+    mcp_tools_stdio,
     subtests,
     tool_name: str,
     expected_desc: str,
@@ -17,13 +17,13 @@ def assert_mcp_tool_descriptions_and_annotations(
     """Reusable test function to verify MCP tools include proper descriptions and annotations.
 
     Args:
-        mcp_tools: List of MCP tools from the mcp_tools fixture
+        mcp_tools_stdio: List of MCP tools from the mcp_tools_stdio fixture
         subtests: pytest subtests fixture for granular test reporting
         tool_name: Name of the tool to test (e.g., "image-builder__get_blueprints")
         expected_desc: Expected start of the tool description
         params: Dictionary of parameter names to their expected schema properties
     """
-    tools = mcp_tools
+    tools = mcp_tools_stdio
 
     # Build map for quick lookup
     name_to_tool = {getattr(t.metadata, "name", ""): t for t in tools}
@@ -52,19 +52,20 @@ def assert_mcp_tool_descriptions_and_annotations(
     # default is null in FastMCP schema by design; actual defaulting occurs server-side
 
 
-def assert_transport_types_expose_tool(mcp_tools, request, tool_name: str):
+def assert_transport_types_expose_tool(mcp_tools_nework, request, tool_name: str):
     """Reusable test function to verify transport types can expose a specific tool.
 
     Args:
-        mcp_tools: List of MCP tools from the mcp_tools fixture
+        mcp_tools_nework: List of MCP tools from the mcp_tools_nework fixture
         request: pytest request fixture to get transport information
         tool_name: Name of the tool to verify (e.g., "image-builder__get_blueprints")
     """
     # Get transport from the fixture parameter
-    transport = request.node.callspec.params["mcp_server_url"]
+    config = request.node.callspec.params["inmemory_test_mcp_server"]
+    transport = config.transport
 
     # Build map for quick lookup
-    tool_names = {getattr(t.metadata, "name", "") for t in mcp_tools}
+    tool_names = {getattr(t.metadata, "name", "") for t in mcp_tools_nework}
 
     # Verify tool is available
     assert tool_name in tool_names, (
@@ -72,15 +73,15 @@ def assert_transport_types_expose_tool(mcp_tools, request, tool_name: str):
     )
 
 
-def assert_stdio_transport_exposes_tool(mcp_tools, tool_name: str):
+def assert_stdio_transport_exposes_tool(mcp_tools_stdio, tool_name: str):
     """Reusable test function to verify stdio transport exposes a specific tool.
 
     Args:
-        mcp_tools: List of MCP tools from the mcp_tools fixture
+        mcp_tools_stdio: List of MCP tools from the mcp_tools_stdio fixture
         tool_name: Name of the tool to verify (e.g., "image-builder__get_blueprints")
     """
     # Build map for quick lookup
-    tool_names = {getattr(t.metadata, "name", "") for t in mcp_tools}
+    tool_names = {getattr(t.metadata, "name", "") for t in mcp_tools_stdio}
 
     # Verify tool is available
     assert tool_name in tool_names, f"{tool_name} not found in tools for stdio transport. Available tools: {tool_names}"

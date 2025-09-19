@@ -25,10 +25,10 @@ class ContentSourcesMCP(InsightsMCP):
     def __init__(self):
         self.logger = logging.getLogger("ContentSourcesMCP")
 
-        general_intro = """You are a Content Sources assistant that helps users access and manage
+        general_intro = """This server helps users query access and manage
         repository information from Red Hat Insights Content Sources.
 
-        You can help users:
+        It can help users:
         - List repositories with various filtering options
         - Search for specific repositories by name, URL, or content type
         - Filter repositories by architecture, version, origin, or enabled status
@@ -44,13 +44,10 @@ class ContentSourcesMCP(InsightsMCP):
 
         Your goal is to help users efficiently access and filter their content sources
         repository information through the Red Hat Insights platform.
-
-        <|function_call_library|>
-
         """
 
         super().__init__(
-            name="Insights Content Sources MCP Server",
+            name="Red Hat Insights Content Sources MCP Server",
             toolset_name="content-sources",
             api_path="api/content-sources/v1.0",
             instructions=general_intro,

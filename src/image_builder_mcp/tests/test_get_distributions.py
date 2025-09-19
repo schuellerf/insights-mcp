@@ -1,11 +1,9 @@
 """Test suite for the get_distributions() method."""
 
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock
 
 import pytest
-
-import image_builder_mcp.server as image_builder_mcp
 
 from .conftest import setup_imagebuilder_mock
 
@@ -84,18 +82,18 @@ class TestGetDistributions:
     @pytest.mark.asyncio
     async def test_get_distributions_auth_error(self, imagebuilder_mcp_server):
         """Test get_distributions when authentication fails."""
-        # Setup mocks
-        with patch.object(image_builder_mcp, "get_http_headers") as mock_headers:
-            mock_headers.return_value = {}  # No auth headers
-            # Mock get_client to raise ValueError
-            with patch.object(imagebuilder_mcp_server, "get_client") as mock_get_client:
-                mock_get_client.side_effect = ValueError("Client ID is required")
+        # Setup mocks to simulate authentication error
 
-                # Call the method
-                result = await imagebuilder_mcp_server.get_distributions()
+        # Mock the client to return an authentication error message
+        imagebuilder_mcp_server.insights_client.get = AsyncMock(
+            return_value="There seems to be a problem with the request. Authentication failed."
+        )
 
-                # Should return authentication error
-                assert "Client ID is required" in result or "authentication" in result.lower()
+        # Call the method
+        result = await imagebuilder_mcp_server.get_distributions()
+
+        # Should return authentication error
+        assert "There seems to be a problem with the request" in result
 
     @pytest.mark.asyncio
     async def test_get_distributions_no_parameters(

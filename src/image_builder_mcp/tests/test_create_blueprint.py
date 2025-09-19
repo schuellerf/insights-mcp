@@ -6,7 +6,6 @@ from tests.conftest import (
     TEST_BLUEPRINT_UUID,
     TEST_CLIENT_ID,
     assert_api_error_result,
-    assert_instruction_in_result,
 )
 
 from .conftest import setup_imagebuilder_mock, setup_imagebuilder_watermark_disabled
@@ -55,7 +54,6 @@ class TestCreateBlueprint:
             assert "Blueprint created via insights-mcp" in posted_data["description"]
 
             # Parse the result
-            assert_instruction_in_result(result)
             assert "Blueprint created successfully" in result
             assert mock_api_response["id"] in result
             assert "get_blueprint_details" in result
@@ -78,7 +76,7 @@ class TestCreateBlueprint:
             posted_data = call_args.kwargs["json"]
             assert posted_data["description"] == mock_blueprint_data["description"]
             assert "Blueprint created via insights-mcp" not in posted_data["description"]
-            assert_instruction_in_result(result)  # Verify result is used
+            assert "Use the tool get_blueprint_details" in result
 
     @pytest.mark.asyncio
     async def test_create_blueprint_api_error(
