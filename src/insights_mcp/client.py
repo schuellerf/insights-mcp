@@ -312,6 +312,8 @@ class InsightsClient:  # pylint: disable=too-many-instance-attributes
         mcp_transport: MCP transport type for error message customization
     """
 
+    _closed: bool = False
+
     def __init__(  # pylint: disable=too-many-arguments
         self,
         *,
@@ -357,6 +359,8 @@ class InsightsClient:  # pylint: disable=too-many-instance-attributes
         # merge headers with client headers
         if headers:
             self.client.headers.update(headers)
+
+        self._closed = False
 
     async def get(
         self,
@@ -423,3 +427,42 @@ class InsightsClient:  # pylint: disable=too-many-instance-attributes
         client = self.client_noauth if noauth else self.client
         url = f"{self.insights_base_url}/{self.api_path}/{endpoint}"
         return await client.make_request(client.put, url=url, json=json, **kwargs)
+
+    async def aclose(self) -> None:
+        """Properly close all HTTP clients to avoid event loop cleanup errors.
+
+        This method ensures that all httpx AsyncClient instances are properly
+        closed before the event loop shuts down, preventing RuntimeError.
+        """
+        if self._closed:
+            return
+
+        try:
+            # Close authenticated client if it's an httpx client
+            if hasattr(self.client, "aclose"):
+                await self.client.aclose()
+
+            # Close non-authenticated client
+            if hasattr(self.client_noauth, "aclose"):
+                await self.client_noauth.aclose()
+
+            self._closed = True
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # Log but don't raise - we're in cleanup
+            if hasattr(self, "logger"):
+                self.logger.debug("Error closing HTTP clients: %s", e)
+
+    async def __aenter__(self):
+        """Support async context manager usage."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Ensure clients are closed when exiting context."""
+        await self.aclose()
+
+    def __del__(self):
+        """Attempt to warn about unclosed clients."""
+        if not self._closed and hasattr(self, "logger"):
+            self.logger.debug(
+                "InsightsClient was not explicitly closed. Consider using 'async with' or calling aclose()"
+            )

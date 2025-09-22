@@ -36,8 +36,9 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
     """
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    def __init__(
-        self,
+    @classmethod
+    async def create(
+        cls,
         server_url: str,
         api_url: str,
         model_id: str,
@@ -46,43 +47,54 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         *,
         tools_override: Optional[List[Union[BaseTool, Callable]]] = None,
         system_prompt_override: Optional[str] = None,
-    ):  # pylint: disable=too-many-instance-attributes
-        self.server_url = server_url
-        self.api_url = api_url
-        self.model_id = model_id
-        self.api_key = api_key
-        self.tools: Optional[List[Union[BaseTool, Callable]]] = []
-        self.system_prompt = ""
-        self.agent: Optional[FunctionAgent] = None
-        self.context: Optional[Context] = None
+    ) -> "MCPAgentWrapper":
+        """Create and initialize a new MCPAgentWrapper instance.
+
+        This is the only way to create an instance of MCPAgentWrapper.
+        Do not use the constructor directly.
+        """
+        instance = cls.__new__(cls)
+
+        # Initialize instance attributes
+        instance.server_url = server_url
+        instance.api_url = api_url
+        instance.model_id = model_id
+        instance.api_key = api_key
+        instance.tools: Optional[List[Union[BaseTool, Callable]]] = []
+        instance.system_prompt = ""
+        instance.agent: Optional[FunctionAgent] = None
+        instance.context: Optional[Context] = None
 
         # Recorded data
-        self._called_tools: List[ToolCall] = []
-        self._step_names: List[str] = []
+        instance._called_tools: List[ToolCall] = []
+        instance._step_names: List[str] = []
 
         # Set up logging for debugging
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        instance.logger = logging.getLogger(f"{__name__}.{cls.__name__}")
 
         # Initialize LlamaIndex LLM
-        self.llama_llm = CustomLlamaIndexLLM(
+        instance.llama_llm = CustomLlamaIndexLLM(
             api_url=api_url,
             model_id=model_id,
             api_key=api_key,
             system_prompt="You are a helpful assistant that can use tools to answer questions and perform tasks.",
         )
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         if verbose_logger:
-            self.logger = verbose_logger
+            instance.logger = verbose_logger
+
+        instance._client_closed = False
 
         # If tools are provided, skip MCP initialization and use provided tools
         if tools_override is not None:
-            self.tools = tools_override
-            self.system_prompt = system_prompt_override or ""
-            asyncio.run(self._setup_agent())
+            instance.tools = tools_override
+            instance.system_prompt = system_prompt_override or ""
+            await instance._setup_agent()
         else:
             # Run async initialization via MCP
-            asyncio.run(self._initialize())
+            await instance._initialize()
+
+        return instance
 
     async def _initialize(self):
         """Initialize MCP session and get available tools."""
@@ -103,6 +115,10 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
 
             mcp_tool_spec = McpToolSpec(client=mcp_client)
             self.tools = await mcp_tool_spec.to_tool_list_async()
+
+            # Store client for cleanup
+            self.mcp_client = mcp_client
+            self.mcp_tool_spec = mcp_tool_spec
 
             if fetch_system_prompt:
                 self.system_prompt = await self._get_system_prompt()
@@ -306,6 +322,22 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
     def get_checkpoints_for_run(self, run_id: str) -> List[Any]:  # pylint: disable=unused-argument
         """No longer uses checkpoints; returns empty list for compatibility."""
         return []
+
+    async def aclose(self) -> None:
+        """Clean up MCP client resources to prevent event loop errors."""
+        if hasattr(self, "_client_closed") and self._client_closed:
+            return
+
+        try:
+            # Close MCP client if it exists
+            if hasattr(self, "mcp_client") and hasattr(self.mcp_client, "aclose"):
+                await self.mcp_client.aclose()
+
+            # Mark as closed
+            if hasattr(self, "_client_closed"):
+                self._client_closed = True
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self.logger.debug("Error closing MCP client: %s", e)
 
 
 # Reuse the CustomLlamaIndexLLM from the original implementation

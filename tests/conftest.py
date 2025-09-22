@@ -32,12 +32,12 @@ _, guardian_llm_config = load_llm_configurations()
 
 
 @pytest.fixture
-def test_agent(mcp_server_url, verbose_logger, request):  # pylint: disable=redefined-outer-name
+async def test_agent(mcp_server_url, verbose_logger, request):  # pylint: disable=redefined-outer-name
     """Create and configure a simplified test agent for the current LLM configuration."""
     # Get llm_config from the test's parametrization
     llm_config = request.node.callspec.params["llm_config"]
 
-    agent = MCPAgentWrapper(
+    agent = await MCPAgentWrapper.create(
         server_url=mcp_server_url,
         api_url=llm_config["MODEL_API"],
         model_id=llm_config["MODEL_ID"],
@@ -46,7 +46,10 @@ def test_agent(mcp_server_url, verbose_logger, request):  # pylint: disable=rede
     )
     verbose_logger.info("🧪 Testing the model: %s", agent.model_id)
 
-    return agent
+    yield agent
+
+    # Cleanup: close the agent's MCP client
+    await agent.aclose()
 
 
 @pytest.fixture
