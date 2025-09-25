@@ -44,9 +44,6 @@ class ContentSourcesMCP(InsightsMCP):
 
         Your goal is to help users efficiently access and filter their content sources
         repository information through the Red Hat Insights platform.
-
-        <|function_call_library|>
-
         """
 
         super().__init__(

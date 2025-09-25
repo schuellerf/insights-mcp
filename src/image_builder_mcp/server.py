@@ -101,9 +101,6 @@ class ImageBuilderMCP(InsightsMCP):
         2. Include the SAME repository UUIDs in BOTH payload_repositories AND custom_repositories fields
         3. This dual inclusion is MANDATORY - missing either field causes build failures
         4. NEVER make up or guess repository UUIDs - ALWAYS use the actual UUIDs from content-sources_list_repositories
-
-        <|function_call_library|>
-
         """
 
         super().__init__(

@@ -181,8 +181,13 @@ def get_latest_release_tag() -> str:
     """Get the latest release tag from github."""
     # https://github.com/RedHatInsights/insights-mcp/releases
     # rather use the api to get the latest release tag
-    response = requests.get("https://api.github.com/repos/RedHatInsights/insights-mcp/releases/latest", timeout=30)
-    response.raise_for_status()
+    try:
+        response = requests.get("https://api.github.com/repos/RedHatInsights/insights-mcp/releases/latest", timeout=30)
+        response.raise_for_status()
+    except Exception as e:  # pylint: disable=broad-except
+        logger = logging.getLogger("InsightsMCPServer")
+        logger.error("Error getting latest release tag: %s", e)
+        return "unknown"
     return response.json()["tag_name"]
 
 

@@ -27,13 +27,31 @@ from .utils import (
 )
 
 
-class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
+class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
     """MCP agent wrapper that records tool calls and step progression.
 
     - Records tool calls for validation in tests
     - Optionally logs step progression if a logger is provided
     - Provides minimal reasoning steps useful for debugging output
     """
+
+    ABBREVIATED_LOG_LENGTH = 2000
+
+    server_url: str
+    api_url: str
+    model_id: str
+    api_key: str
+    tools: Optional[List[Union[BaseTool, Callable]]]
+    system_prompt: str
+    agent: Optional[FunctionAgent]
+    context: Optional[Context]
+    _called_tools: List[ToolCall]
+    _step_names: List[str]
+    logger: logging.Logger
+    llama_llm: "CustomLlamaIndexLLM"
+    mcp_client: Any
+    mcp_tool_spec: Any
+    _client_closed: bool
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     @classmethod
@@ -60,14 +78,14 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         instance.api_url = api_url
         instance.model_id = model_id
         instance.api_key = api_key
-        instance.tools: Optional[List[Union[BaseTool, Callable]]] = []
+        instance.tools = []
         instance.system_prompt = ""
-        instance.agent: Optional[FunctionAgent] = None
-        instance.context: Optional[Context] = None
+        instance.agent = None
+        instance.context = None
 
         # Recorded data
-        instance._called_tools: List[ToolCall] = []
-        instance._step_names: List[str] = []
+        instance._called_tools = []
+        instance._step_names = []
 
         # Set up logging for debugging
         instance.logger = logging.getLogger(f"{__name__}.{cls.__name__}")
@@ -89,7 +107,7 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         if tools_override is not None:
             instance.tools = tools_override
             instance.system_prompt = system_prompt_override or ""
-            await instance._setup_agent()
+            await instance.setup_agent()
         else:
             # Run async initialization via MCP
             await instance._initialize()
@@ -99,7 +117,7 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
     async def _initialize(self):
         """Initialize MCP session and get available tools."""
         await self._init_mcp_tools()
-        await self._setup_agent()
+        await self.setup_agent()
 
     async def _init_mcp_tools(self):
         """Initialize MCP tools using LlamaIndex MCP support."""
@@ -224,7 +242,7 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
             wrapped.append(self._wrap_one_tool(t))
         self.tools = wrapped
 
-    async def _setup_agent(self):
+    async def setup_agent(self):
         """Setup LlamaIndex agent with MCP tools and optional verbose logging."""
         # Reset recordings for a new session
         self._called_tools = []
@@ -239,6 +257,7 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
             system_prompt=self.system_prompt,
             llm=self.llama_llm,
             tools=self.tools,
+            initial_tool_choice="auto",
         )
         self.context = Context(self.agent)
 
@@ -250,7 +269,13 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         chat_history: Optional[List[ChatMessage]] = None,
         max_iterations: int = 10,
     ) -> Tuple[str, List[Dict[str, Any]], List[Any], List[ChatMessage]]:  # pylint: disable=too-many-locals,too-many-arguments
-        """Execute agent, record tool calls and steps, return response and artifacts."""
+        """Execute agent, record tool calls and steps.
+        Returns:
+            response: The response from the agent
+            reasoning_steps: The reasoning steps from the agent
+            tools_called: The tools called by the agent
+            updated_history: The updated chat history
+        """
         if chat_history is None or len(chat_history) == 0:
             # ensure system prompt is included in chat history
             if self.system_prompt:
@@ -270,6 +295,7 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
             ctx=self.context,
             chat_history=chat_history,
             max_iterations=max_iterations,
+            tool_choice="auto",
         )
 
         # Consume events to capture step progression
@@ -279,8 +305,12 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
                 self._step_names.append(ev_name)
                 if self.logger and ev_name not in ["AgentStream"]:
                     data = f"{ev}"
-                    if len(data) > 2000:
-                        data = data[:1000] + "\n<… abbreviated log …>\n" + data[-1000:]
+                    if len(data) > self.ABBREVIATED_LOG_LENGTH:
+                        data = (
+                            data[: self.ABBREVIATED_LOG_LENGTH // 2]
+                            + "\n<… abbreviated log …>\n"
+                            + data[-self.ABBREVIATED_LOG_LENGTH // 2 :]
+                        )
                     self.logger.debug("📡 Event %s: %s", ev_name, data)
 
         # Run streaming in background while awaiting result
@@ -339,6 +369,26 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.debug("Error closing MCP client: %s", e)
 
+    # Public helpers for tests to avoid accessing protected members
+    def mark_client_closed(self, value: bool = True) -> None:
+        """Mark the internal client closed flag for in-process tests."""
+        self._client_closed = value
+
+    def reset_recordings(self) -> None:
+        """Reset recorded tool calls and step names for a fresh run."""
+        self._called_tools = []
+        self._step_names = []
+
+    @property
+    def called_tools(self) -> List[ToolCall]:
+        """Return a copy of recorded tool calls."""
+        return list(self._called_tools)
+
+    @property
+    def step_names(self) -> List[str]:
+        """Return a copy of recorded workflow step names."""
+        return list(self._step_names)
+
 
 # Reuse the CustomLlamaIndexLLM from the original implementation
 # pylint: disable=too-few-public-methods,too-many-ancestors
@@ -347,7 +397,13 @@ class CustomLlamaIndexLLM(OpenAI):
 
     def __init__(self, api_url: str, model_id: str, api_key: str, system_prompt: str = "", **kwargs):
         super().__init__(
-            model=model_id, api_key=api_key, api_base=api_url, temperature=kwargs.get("temperature", 0.1), **kwargs
+            model=model_id,
+            api_key=api_key,
+            api_base=api_url,
+            temperature=kwargs.get("temperature", 0.1),
+            timeout=120,  # Increase timeout to 120 seconds
+            additional_kwargs={"tool_choice": "auto"},  # Completely disable tool usage
+            **kwargs,
         )
         self._custom_model_id = model_id
         self._system_prompt = system_prompt
