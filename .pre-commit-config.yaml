@@ -35,10 +35,6 @@ repos:
           - llama-index-core
           - llama-index-tools-mcp
           - llama-index-llms-openai
-  - repo: https://github.com/hhatto/autopep8
-    rev: v2.3.2
-    hooks:
-      - id: autopep8
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.13.2
     hooks:
