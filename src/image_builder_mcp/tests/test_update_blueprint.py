@@ -5,7 +5,6 @@ import pytest
 from tests.conftest import (
     TEST_BLUEPRINT_UUID,
     assert_api_error_result,
-    assert_instruction_in_result,
 )
 
 from .conftest import setup_imagebuilder_mock, setup_imagebuilder_watermark_disabled
@@ -103,7 +102,7 @@ class TestUpdateBlueprint:
             posted_data = call_args.kwargs["json"]
             assert posted_data["description"] == mock_blueprint_data["description"]
             assert "Blueprint updated via insights-mcp" not in posted_data["description"]
-            assert_instruction_in_result(result)  # Verify result is used
+            assert "Use the tool get_blueprint_details" in result
 
     @pytest.mark.asyncio
     async def test_update_blueprint_api_error(

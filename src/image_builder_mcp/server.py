@@ -283,7 +283,7 @@ class ImageBuilderMCP(InsightsMCP):
         except Exception as e:  # pylint: disable=broad-exception-caught
             return f"Error: {str(e)} in blueprint_compose {blueprint_uuid}"
 
-        response_str = "[INSTRUCTION] Use the tool get_compose_details to get the details of the compose\n"
+        response_str = "Use the tool get_compose_details to get the details of the compose\n"
         response_str += "like the current build status\n"
         response_str += "[ANSWER] Compose created successfully:"
         build_ids_str: list[str] = []
@@ -441,7 +441,7 @@ class ImageBuilderMCP(InsightsMCP):
                 f"Response: {json.dumps(response)}"
             )
 
-        response_str = "[INSTRUCTION] Use the tool get_blueprint_details to get the details of the blueprint\n"
+        response_str = "Use the tool get_blueprint_details to get the details of the blueprint\n"
         response_str += "or ask the user to start the build/compose with blueprint_compose\n"
         response_str += f"Always show a link to the blueprint UI: {self.get_blueprint_url(client, response['id'])}\n"
         response_str += f"[ANSWER] Blueprint created successfully: {{'UUID': '{response['id']}'}}\n"
@@ -493,7 +493,7 @@ class ImageBuilderMCP(InsightsMCP):
 
         # Build an instructional answer with a UI link like in create_blueprint
         instruction = (
-            "[INSTRUCTION] Use the tool get_blueprint_details to verify the updated blueprint or open the UI URL.\n"
+            "Use the tool get_blueprint_details to verify the updated blueprint or open the UI URL.\n"
             f"Always show a link to the blueprint UI: "
             f"{self.get_blueprint_url(client, response.get('id', blueprint_uuid))}\n"
         )
@@ -564,7 +564,7 @@ class ImageBuilderMCP(InsightsMCP):
                 else:
                     ret.append(data)
 
-            intro = "[INSTRUCTION] Use the UI_URL to link to the blueprint\n"
+            intro = "Use the UI_URL to link to the blueprint\n"
             intro += self.paging_reminder
             return f"{intro}\n{json.dumps(ret)}"
         # avoid crashing the server so we'll stick to the broad exception catch
@@ -599,9 +599,9 @@ class ImageBuilderMCP(InsightsMCP):
                     return json.dumps([response])
 
                 return json.dumps([{"error": "Unexpected list response", "data": response}])
-            ret = f"[INSTRUCTION] Error: {blueprint_identifier} is not a valid blueprint identifier,"
+            ret = f"Error: {blueprint_identifier} is not a valid blueprint identifier,"
             ret += "please use the UUID from get_blueprints\n"
-            ret += "[INSTRUCTION] retry calling get_blueprints\n\n"
+            ret += "retry calling get_blueprints\n\n"
             ret += f"[ANSWER] {blueprint_identifier} is not a valid blueprint identifier"
             return ret
         # avoid crashing the server so we'll stick to the broad exception catch
@@ -702,7 +702,7 @@ class ImageBuilderMCP(InsightsMCP):
                     ret.append(data)
 
             intro = (
-                "[INSTRUCTION] Present a bulleted list and use the blueprint_url to link to the "
+                "Present a bulleted list and use the blueprint_url to link to the "
                 "blueprint which created this compose\n"
             )
             intro += self.paging_reminder
@@ -763,10 +763,10 @@ class ImageBuilderMCP(InsightsMCP):
                 response["compose_uuid"] = compose_identifier
             else:
                 ret = (
-                    f"[INSTRUCTION] Error: {compose_identifier} is not a valid compose identifier,"
+                    f"Error: {compose_identifier} is not a valid compose identifier,"
                     "please use the UUID from get_composes\n"
                 )
-                ret += "[INSTRUCTION] retry calling get_composes\n\n"
+                ret += "retry calling get_composes\n\n"
                 ret += f"[ANSWER] {compose_identifier} is not a valid compose identifier"
                 return ret
 
@@ -777,7 +777,7 @@ class ImageBuilderMCP(InsightsMCP):
 
             if download_url and upload_target == "oci.objectstorage":
                 intro += """
-[INSTRUCTION] Leave the URL as code block so the user can copy and paste it.
+Leave the URL as code block so the user can copy and paste it.
 
 To run the image copy the link below and follow the steps below:
 
@@ -792,7 +792,7 @@ To run the image copy the link below and follow the steps below:
 """
             elif image_name and upload_target == "gcp":
                 intro += f"""
-[INSTRUCTION] present the two code blocks with their respective explanations below to the user.
+present the two code blocks with their respective explanations below to the user.
 
 To launch this image, contact your org admin to adjust your launch permissions.
 

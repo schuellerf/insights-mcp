@@ -8,7 +8,6 @@ from tests.conftest import (
     TEST_BLUEPRINT_UUID,
     assert_api_error_result,
     assert_empty_response,
-    assert_instruction_in_result,
 )
 
 from .conftest import setup_imagebuilder_mock
@@ -60,7 +59,6 @@ class TestGetComposes:
             imagebuilder_mock_client.get.assert_called_once_with("composes", params={"limit": 7, "offset": 0})
 
             # Parse the result
-            assert_instruction_in_result(result)
             assert "Present a bulleted list" in result
             assert "There could be more entries" in result
 
@@ -172,4 +170,4 @@ class TestGetComposes:
 
             # Should use default response size (10)
             imagebuilder_mock_client.get.assert_called_once_with("composes", params={"limit": 10, "offset": 0})
-            assert_instruction_in_result(result)  # Verify result is used
+            assert "Present a bulleted list" in result

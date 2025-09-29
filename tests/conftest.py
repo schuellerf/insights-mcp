@@ -221,8 +221,3 @@ def assert_api_error_result(result, error_message="API Error"):
 def assert_empty_response(result):
     """Helper to assert empty response results."""
     assert "[]" in result
-
-
-def assert_instruction_in_result(result, instruction="[INSTRUCTION]"):
-    """Helper to assert instruction text in result."""
-    assert instruction in result

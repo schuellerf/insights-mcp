@@ -47,7 +47,6 @@ class TestAuthentication:
             # Should return authentication error
             # The actual implementation makes API calls and gets 401 errors when no auth is provided
             assert "Invalid client or Invalid client credentials" in result
-            assert "[INSTRUCTION]" in result
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("function_name,kwargs", AUTH_FUNCTIONS)

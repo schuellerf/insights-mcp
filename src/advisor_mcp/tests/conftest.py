@@ -15,7 +15,6 @@ from tests.conftest import (
     TEST_CLIENT_SECRET,
     assert_api_error_result,
     assert_empty_response,
-    assert_instruction_in_result,
     create_mcp_server,
     create_mock_client,
     default_response_size,
@@ -109,7 +108,6 @@ def setup_advisor_mock(mcp_server, mock_client, mock_response=None, side_effect=
 __all__ = [
     "assert_api_error_result",
     "assert_empty_response",
-    "assert_instruction_in_result",
     "advisor_mcp_server",
     "advisor_mock_client",
     "create_mcp_server",

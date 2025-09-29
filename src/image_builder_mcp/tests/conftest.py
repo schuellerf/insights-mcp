@@ -18,7 +18,6 @@ from tests.conftest import (
     TEST_CLIENT_SECRET,
     assert_api_error_result,
     assert_empty_response,
-    assert_instruction_in_result,
     create_mcp_server,
     create_mock_client,
     default_response_size,
@@ -71,7 +70,6 @@ def setup_imagebuilder_watermark_disabled():
 __all__ = [
     "assert_api_error_result",
     "assert_empty_response",
-    "assert_instruction_in_result",
     "create_mcp_server",
     "create_mock_client",
     "default_response_size",

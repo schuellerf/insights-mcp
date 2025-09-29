@@ -60,7 +60,7 @@ class TestGetBlueprintDetails:
             result = await imagebuilder_mcp_server.get_blueprint_details(blueprint_identifier=invalid_uuid)
 
             # Should return error message about invalid identifier
-            assert "[INSTRUCTION] Error:" in result
+            assert "Error:" in result
             assert "is not a valid blueprint identifier" in result
             assert "please use the UUID from get_blueprints" in result
 
