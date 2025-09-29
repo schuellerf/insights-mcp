@@ -182,10 +182,7 @@ class ImageBuilderMCP(InsightsMCP):
         Returns:
             List of distributions
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+        client = self.get_client(get_http_headers())
 
         try:
             distributions = await client.get("distributions")
@@ -254,10 +251,6 @@ class ImageBuilderMCP(InsightsMCP):
         api_path = self.api_path
         return httpx.get(f"{base_url}/{api_path}/openapi.json", timeout=60).text
 
-    def no_auth_error(self, e: httpx.HTTPStatusError | ValueError) -> str:
-        """Generate authentication error message based on transport type."""
-        return self.insights_client.client.no_auth_error(e)
-
     async def blueprint_compose(
         self, blueprint_uuid: Annotated[str, Field(description="The UUID of the blueprint to compose")]
     ) -> str:
@@ -272,10 +265,7 @@ class ImageBuilderMCP(InsightsMCP):
 
         Raises:
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+        client = self.get_client(get_http_headers())
 
         try:
             response = await client.post(f"blueprints/{blueprint_uuid}/compose")
@@ -418,10 +408,8 @@ class ImageBuilderMCP(InsightsMCP):
         Returns:
             The response from the image-builder API
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+        client = self.get_client(get_http_headers())
+
         try:
             if os.environ.get("IMAGE_BUILDER_MCP_DISABLE_DESCRIPTION_WATERMARK", "").lower() != "true":
                 desc_parts = [data.get("description", ""), WATERMARK_CREATED]
@@ -467,10 +455,7 @@ class ImageBuilderMCP(InsightsMCP):
         Returns:
             The response from the image-builder API
         """
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+        client = self.get_client(get_http_headers())
 
         try:
             if os.environ.get("IMAGE_BUILDER_MCP_DISABLE_DESCRIPTION_WATERMARK", "").lower() != "true":
@@ -519,10 +504,7 @@ class ImageBuilderMCP(InsightsMCP):
         🟢 CALL IMMEDIATELY - No information gathering required.
         """
 
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+        client = self.get_client(get_http_headers())
 
         # workaround seen in LLama 3.3 70B Instruct
         if search_string == "null":
@@ -586,10 +568,7 @@ class ImageBuilderMCP(InsightsMCP):
         """
         if not blueprint_identifier:
             return "Error: a blueprint identifier is required"
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+        client = self.get_client(get_http_headers())
 
         try:
             # If the identifier looks like a UUID, use it directly
@@ -709,8 +688,6 @@ class ImageBuilderMCP(InsightsMCP):
             intro += "[ANSWER]\n"
             return f"{intro}\n{json.dumps(ret)}"
 
-        except ValueError as e:
-            return self.no_auth_error(e)
         # avoid crashing the server so we'll stick to the broad exception catch
         except Exception as e:  # pylint: disable=broad-exception-caught
             return f"Error: {str(e)}"
@@ -740,10 +717,7 @@ class ImageBuilderMCP(InsightsMCP):
         """
         if not compose_identifier:
             return "Error: Compose UUID is required"
-        try:
-            client = self.get_client(get_http_headers())
-        except ValueError as e:
-            return self.no_auth_error(e)
+        client = self.get_client(get_http_headers())
 
         try:
             # If the identifier looks like a UUID, use it directly
