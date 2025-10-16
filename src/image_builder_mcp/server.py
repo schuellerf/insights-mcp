@@ -234,6 +234,7 @@ class ImageBuilderMCP(InsightsMCP):
                 client_secret = self.get_client_secret(headers)
             client = InsightsClient(
                 api_path="api/image-builder/v1",
+                base_url=self.insights_client.insights_base_url,
                 client_id=client_id,
                 client_secret=client_secret,
                 mcp_transport=self.insights_client.mcp_transport,

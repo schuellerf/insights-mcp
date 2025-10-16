@@ -101,3 +101,81 @@ For more detailed information about running a PipelineRun, please refer to Pipel
 To customize the proposed PipelineRuns after merge, please refer to [Build Pipeline customization](https://konflux-ci.dev/docs/how-tos/configuring/)
 
 Please follow the block sequence indentation style introduced by the proposed PipelineRuns YAMLs, or keep using consistent indentation level through your customized PipelineRuns. When different levels are mixed, it will be changed to the proposed style.
+
+## Stage
+
+To use the internal stage server, you need to set the environment variables accordingly:
+
+* `INSIGHTS_BASE_URL`
+* `INSIGHTS_STAGE_PROXY_URL`
+* `INSIGHTS_STAGE_TOKEN_ENDPOINT`
+* and enable with `--stage` flag
+
+The concrete values are considered internal and thus are not documented here.
+
+```json
+{
+	"servers": {
+		"insights-mcp-stage": {
+			"type": "stdio",
+			"command": "podman",
+			"args": [
+				"run",
+				"--env",
+				"INSIGHTS_CLIENT_ID",
+				"--env",
+				"INSIGHTS_CLIENT_SECRET",
+				"--env",
+				"INSIGHTS_BASE_URL",
+				"--env",
+				"INSIGHTS_STAGE_PROXY_URL",
+				"--env",
+				"INSIGHTS_STAGE_TOKEN_ENDPOINT",
+				"--stage",
+				"--interactive",
+				"--rm",
+				"ghcr.io/redhatinsights/insights-mcp:latest",
+				"--debug"
+			],
+			"env": {
+				"INSIGHTS_CLIENT_ID": "${input:insights_client_stage_id}",
+				"INSIGHTS_CLIENT_SECRET": "${input:insights_client_stage_secret}",
+				"INSIGHTS_BASE_URL": "${input:insights_base_url}",
+				"INSIGHTS_STAGE_PROXY_URL": "${input:insights_stage_proxy_url}",
+				"INSIGHTS_STAGE_TOKEN_ENDPOINT": "${input:insights_stage_token_endpoint}"
+			}
+		}
+  },
+  "inputs": [
+		{
+			"id": "insights_client_stage_id",
+			"type": "promptString",
+			"description": "Enter the Red Hat Insights Stage Client ID",
+			"default": "",
+			"password": true
+		},
+		{
+			"id": "insights_client_stage_secret",
+			"type": "promptString",
+			"description": "Enter the Red Hat Insights Stage Client Secret",
+			"default": "",
+			"password": true
+		},
+		{
+			"id": "insights_base_url",
+			"type": "promptString",
+			"description": "Enter the Red Hat Insights Base URL"
+		},
+		{
+			"id": "insights_stage_proxy_url",
+			"type": "promptString",
+			"description": "Enter the Red Hat Insights Stage Proxy URL"
+		},
+		{
+			"id": "insights_stage_token_endpoint",
+			"type": "promptString",
+			"description": "Enter the Red Hat Insights Stage Token Endpoint"
+		}
+	]
+}
+```

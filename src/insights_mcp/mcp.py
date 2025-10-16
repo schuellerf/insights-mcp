@@ -32,6 +32,8 @@ class InsightsMCP(FastMCP):
         name: str,
         toolset_name: str,
         api_path: str,
+        base_url: str = INSIGHTS_BASE_URL,
+        proxy_url: str | None = None,
         *,
         headers: dict[str, str] | None = None,
         instructions: str | None = None,
@@ -51,13 +53,15 @@ class InsightsMCP(FastMCP):
         self.api_path = api_path
         self.toolset_name = toolset_name
         self.headers = headers or {}
+        self.base_url = base_url
+        self.proxy_url = proxy_url
         # initialize with unauthenticated client
-        self.insights_client = InsightsClient(api_path=self.api_path)
+        self.insights_client = InsightsClient(api_path=self.api_path, base_url=self.base_url, proxy_url=self.proxy_url)
 
     def init_insights_client(  # pylint: disable=too-many-arguments
         self,
         *,
-        base_url: str = INSIGHTS_BASE_URL,
+        base_url: str | None = None,
         client_id: str | None = None,
         client_secret: str | None = None,
         refresh_token: str | None = None,
@@ -88,6 +92,12 @@ class InsightsMCP(FastMCP):
         # merge headers with self.headers
         if headers is not None:
             self.headers.update(headers)
+
+        if base_url is None:
+            base_url = self.base_url
+
+        if proxy_url is None:
+            proxy_url = self.proxy_url
 
         self.insights_client = InsightsClient(  # pylint: disable=duplicate-code
             api_path=self.api_path,
