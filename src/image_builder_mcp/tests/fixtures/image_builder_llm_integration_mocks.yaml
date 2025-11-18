@@ -1,0 +1,241 @@
+routes:
+  - method: GET
+    path: /
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      status: ok
+
+  - method: GET
+    path: /api/image-builder/v1/openapi.json
+    status: 200
+    headers:
+      Content-Type: application/json
+    body_file: ../image-builder-openapi.json
+
+  - method: GET
+    path: /api/image-builder/v1/distributions
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      - name: rhel-9
+        description: Red Hat Enterprise Linux 9
+      - name: rhel-10
+        description: Red Hat Enterprise Linux 10
+      - name: rhel-8
+        description: Red Hat Enterprise Linux 8
+
+  - method: GET
+    path: /api/image-builder/v1/blueprints
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      data:
+        - id: "11111111-1111-1111-1111-111111111111"
+          name: "my-rhel-9-blueprint"
+          description: "RHEL 9 blueprint for testing"
+          version: 1
+          last_modified_at: "2025-01-18T10:00:00Z"
+        - id: "22222222-2222-2222-2222-222222222222"
+          name: "production-blueprint"
+          description: "Production blueprint"
+          version: 2
+          last_modified_at: "2025-01-17T15:30:00Z"
+        - id: "33333333-3333-3333-3333-333333333333"
+          name: "test-blueprint"
+          description: "Test blueprint"
+          version: 1
+          last_modified_at: "2025-01-16T12:00:00Z"
+        - id: "44444444-4444-4444-4444-444444444444"
+          name: "dev-blueprint"
+          description: "Development blueprint"
+          version: 3
+          last_modified_at: "2025-01-15T09:00:00Z"
+        - id: "55555555-5555-5555-5555-555555555555"
+          name: "staging-blueprint"
+          description: "Staging blueprint"
+          version: 1
+          last_modified_at: "2025-01-14T14:20:00Z"
+        - id: "66666666-6666-6666-6666-666666666666"
+          name: "custom-blueprint"
+          description: "Custom blueprint"
+          version: 2
+          last_modified_at: "2025-01-13T11:10:00Z"
+        - id: "77777777-7777-7777-7777-777777777777"
+          name: "another-blueprint"
+          description: "Another blueprint"
+          version: 1
+          last_modified_at: "2025-01-12T08:00:00Z"
+      links:
+        first: /api/image-builder/v1/blueprints?limit=7&offset=0
+        last: /api/image-builder/v1/blueprints?limit=7&offset=0
+      meta:
+        count: 7
+
+  - method: POST
+    path: /api/image-builder/v1/blueprints
+    status: 201
+    headers:
+      Content-Type: application/json
+    body:
+      id: "88888888-8888-8888-8888-888888888888"
+      name: "my-rhel9-image"
+      description: "Blueprint created via insights-mcp"
+      version: 1
+
+  - method: GET
+    path: /api/image-builder/v1/composes
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      data:
+        - id: "abcd1234-5678-9012-3456-789012345678"
+          blueprint_id: "11111111-1111-1111-1111-111111111111"
+          blueprint_version: 1
+          client_id: "mcp"
+          image_name: "rhel-9-test-image"
+          created_at: "2025-01-18T15:30:00Z"
+          request:
+            distribution: "rhel-9"
+            image_requests:
+              - architecture: "x86_64"
+                image_type: "guest-image"
+                upload_request:
+                  type: "aws"
+                  options: {}
+        - id: "efgh5678-9012-3456-7890-123456789012"
+          blueprint_id: "22222222-2222-2222-2222-222222222222"
+          blueprint_version: 2
+          client_id: "mcp"
+          image_name: "rhel-10-production"
+          created_at: "2025-01-18T14:15:00Z"
+          request:
+            distribution: "rhel-10"
+            image_requests:
+              - architecture: "x86_64"
+                image_type: "ami"
+                upload_request:
+                  type: "aws"
+                  options: {}
+        - id: "ijkl9012-3456-7890-1234-567890123456"
+          blueprint_id: "33333333-3333-3333-3333-333333333333"
+          blueprint_version: 1
+          client_id: "mcp"
+          image_name: "fedora-test-build"
+          created_at: "2025-01-18T13:00:00Z"
+          request:
+            distribution: "fedora-42"
+            image_requests:
+              - architecture: "aarch64"
+                image_type: "azure"
+                upload_request:
+                  type: "azure"
+                  options: {}
+      links:
+        first: /api/image-builder/v1/composes?limit=100&offset=0
+        last: /api/image-builder/v1/composes?limit=100&offset=0
+      meta:
+        count: 3
+
+  - method: GET
+    path: /api/image-builder/v1/composes/abcd1234-5678-9012-3456-789012345678
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      id: "abcd1234-5678-9012-3456-789012345678"
+      blueprint_id: "11111111-1111-1111-1111-111111111111"
+      image_name: "rhel-9-test-image"
+      created_at: "2025-01-18T15:30:00Z"
+      image_status:
+        status: "success"
+        upload_status:
+          type: "aws"
+          status: "success"
+          options:
+            url: "https://example.com/download/rhel-9-test-image.tar.gz"
+            image_name: "my-custom-image"
+      request:
+        distribution: "rhel-9"
+        image_requests:
+          - architecture: "x86_64"
+            image_type: "guest-image"
+            upload_request:
+              type: "aws"
+              options: {}
+
+  - method: GET
+    path: /api/image-builder/v1/composes/efgh5678-9012-3456-7890-123456789012
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      id: "efgh5678-9012-3456-7890-123456789012"
+      blueprint_id: "22222222-2222-2222-2222-222222222222"
+      image_name: "rhel-10-production"
+      created_at: "2025-01-18T14:15:00Z"
+      image_status:
+        status: "building"
+      request:
+        distribution: "rhel-10"
+        image_requests:
+          - architecture: "x86_64"
+            image_type: "ami"
+            upload_request:
+              type: "aws"
+              options: {}
+
+  - method: GET
+    path: /api/image-builder/v1/composes/ijkl9012-3456-7890-1234-567890123456
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      id: "ijkl9012-3456-7890-1234-567890123456"
+      blueprint_id: "33333333-3333-3333-3333-333333333333"
+      image_name: "fedora-test-build"
+      created_at: "2025-01-18T13:00:00Z"
+      image_status:
+        status: "failure"
+        error:
+          id: 1
+          reason: "Build failed due to package conflicts"
+      request:
+        distribution: "fedora-42"
+        image_requests:
+          - architecture: "aarch64"
+            image_type: "azure"
+            upload_request:
+              type: "azure"
+              options: {}
+
+  - method: POST
+    path: /auth/realms/redhat-external/protocol/openid-connect/token
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      access_token: mock-access-token
+      expires_in: 3600
+      token_type: Bearer
+
+  - method: GET
+    path: /auth/realms/redhat-external/protocol/openid-connect/token
+    status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      access_token: mock-access-token
+      expires_in: 3600
+      token_type: Bearer
+
+default:
+  status: 404
+  headers:
+    Content-Type: application/json
+  body:
+    error: not mocked

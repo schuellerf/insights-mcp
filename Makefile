@@ -24,23 +24,28 @@ build-claude-extension-dev: build ## Build Claude extension for local developmen
 lint: generate-docs ## Run linting with pre-commit
 	pre-commit run --all-files --hook-stage manual
 
+.PHONY: sync-openapi
+sync-openapi: ## Sync OpenAPI specs from remote URLs for local testing with mock server
+	@echo "Syncing OpenAPI specs..."
+	uv run python tools/sync_openapi_specs.py --config tools/openapi-sources.yaml
+
 .PHONY: test
-test: ## Run tests with pytest (hides logging output)
+test: sync-openapi ## Run tests with pytest (hides logging output)
 	@echo "Running pytest tests..."
 	env DEEPEVAL_TELEMETRY_OPT_OUT=YES uv run pytest -v
 
 .PHONY: test-verbose
-test-verbose: ## Run tests with pytest with verbose output (shows logging output)
+test-verbose: sync-openapi ## Run tests with pytest with verbose output (shows logging output)
 	@echo "Running pytest tests with verbose output..."
 	env DEEPEVAL_TELEMETRY_OPT_OUT=YES uv run pytest -vv -o log_cli=true
 
 .PHONY: test-very-verbose
-test-very-verbose: ## Run tests with pytest showing all intermediate agent steps (shows logging output)
+test-very-verbose: sync-openapi ## Run tests with pytest showing all intermediate agent steps (shows logging output)
 	@echo "Running pytest tests with debug output..."
 	env DEEPEVAL_TELEMETRY_OPT_OUT=YES uv run pytest -vvv -o log_cli=true
 
 .PHONY: test-coverage
-test-coverage: ## Run tests with coverage reporting
+test-coverage: sync-openapi ## Run tests with coverage reporting
 	@echo "Running pytest tests with coverage..."
 	env DEEPEVAL_TELEMETRY_OPT_OUT=YES uv run pytest -v --cov=. --cov-report=html --cov-report=term-missing
 

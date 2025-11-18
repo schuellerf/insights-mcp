@@ -1344,6 +1344,10 @@ dev = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "llama-index" },
+    { name = "llama-index-core" },
+    { name = "llama-index-llms-openai" },
+    { name = "llama-index-tools-mcp" },
     { name = "pytest-subtests" },
 ]
 
@@ -1351,11 +1355,11 @@ dev = [
 requires-dist = [
     { name = "autopep8", marker = "extra == 'dev'" },
     { name = "deepeval", marker = "extra == 'dev'" },
-    { name = "fastmcp", specifier = ">=2.10.1" },
-    { name = "llama-index", marker = "extra == 'dev'" },
-    { name = "llama-index-core", marker = "extra == 'dev'" },
-    { name = "llama-index-llms-openai", marker = "extra == 'dev'" },
-    { name = "llama-index-tools-mcp", marker = "extra == 'dev'" },
+    { name = "fastmcp", specifier = ">=2.13.1" },
+    { name = "llama-index", marker = "extra == 'dev'", specifier = ">=0.14.8" },
+    { name = "llama-index-core", marker = "extra == 'dev'", specifier = ">=0.14.8" },
+    { name = "llama-index-llms-openai", marker = "extra == 'dev'", specifier = ">=0.6.9" },
+    { name = "llama-index-tools-mcp", marker = "extra == 'dev'", specifier = ">=0.4.3" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "pyjwt" },
     { name = "pylint", marker = "extra == 'dev'" },
@@ -1369,7 +1373,13 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest-subtests", specifier = ">=0.14.2" }]
+dev = [
+    { name = "llama-index", specifier = ">=0.14.8" },
+    { name = "llama-index-core", specifier = ">=0.14.8" },
+    { name = "llama-index-llms-openai", specifier = ">=0.6.9" },
+    { name = "llama-index-tools-mcp", specifier = ">=0.4.3" },
+    { name = "pytest-subtests", specifier = ">=0.14.2" },
+]
 
 [[package]]
 name = "isort"

@@ -81,13 +81,17 @@ def test_mcp_tools_include_descriptions_and_annotations(
     assert_mcp_tool_descriptions_and_annotations(mcp_tools, subtests, tool_name, expected_desc, params)
 
 
-@pytest.mark.parametrize("mcp_server_url", ["http", "sse"], indirect=True)
+@pytest.mark.parametrize(
+    "mcp_server_url",
+    [{"transport": "http", "toolset": "image-builder"}, {"transport": "sse", "toolset": "image-builder"}],
+    indirect=True,
+)
 def test_transport_types_with_get_blueprints(mcp_tools, request):
     """Test that http and sse transport types can start and expose get_blueprints tool."""
     assert_transport_types_expose_tool(mcp_tools, request, "image-builder__get_blueprints")
 
 
-@pytest.mark.parametrize("mcp_server_url", ["stdio"], indirect=True)
+@pytest.mark.parametrize("mcp_server_url", [{"transport": "stdio", "toolset": "image-builder"}], indirect=True)
 def test_stdio_transport_with_get_blueprints(mcp_tools):
     """Test stdio transport with get_blueprints tool using BasicMCPClient subprocess."""
     assert_stdio_transport_exposes_tool(mcp_tools, "image-builder__get_blueprints")

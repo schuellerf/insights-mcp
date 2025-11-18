@@ -14,6 +14,8 @@ from deepeval.models.base_model import DeepEvalBaseLLM
 from llama_index.core.llms import ChatMessage
 from pydantic import BaseModel
 
+from insights_mcp.server import main
+
 # Constants
 DEFAULT_JSON_HEADERS = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
 
@@ -97,10 +99,6 @@ def cleanup_server_process(server_process: multiprocessing.Process) -> None:
             server_process.kill()
 
 
-class ServerStartupError(Exception):
-    """Exception raised when MCP server fails to start."""
-
-
 class ServerConnectionError(Exception):
     """Exception raised when unable to connect to MCP server."""
 
@@ -162,10 +160,6 @@ def _server_worker(
                 base_args.extend(["http", "--host", "127.0.0.1", "--port", str(port)])
 
             sys.argv = base_args
-
-            # Import and call main
-            # pylint: disable=import-outside-toplevel
-            from insights_mcp.server import main
 
             # Signal that server is starting
             server_queue.put("starting")
@@ -251,22 +245,6 @@ def start_insights_mcp_server(
     except Exception:  # pylint: disable=broad-exception-caught
         cleanup_server_process(server_process)
         raise
-
-
-def parse_mcp_response(response_text: str) -> Dict[str, Any]:
-    """Parse MCP response which could be JSON or SSE format."""
-    try:
-        return json.loads(response_text)
-    except json.JSONDecodeError as exc:
-        # Try parsing as SSE format
-        for line in response_text.split("\n"):
-            if line.startswith("data: "):
-                data_part = line[6:]  # Remove 'data: ' prefix
-                try:
-                    return json.loads(data_part)
-                except json.JSONDecodeError:
-                    continue
-        raise ValueError(f"No valid JSON found in response: {response_text}") from exc
 
 
 def make_llm_api_request(api_url: str, api_key: str, payload: Dict[str, Any]) -> str:

@@ -7,27 +7,272 @@ This implementation removes reliance on deprecated WorkflowCheckpointer and inst
 """
 
 import asyncio
+import json
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
 
-import requests
 from deepeval.test_case import ToolCall
 from llama_index.core.agent.workflow import FunctionAgent
-from llama_index.core.base.llms.types import LLMMetadata
+from llama_index.core.base.llms.types import (
+    ChatResponse,
+    LLMMetadata,
+    MessageRole,
+    TextBlock,
+    ToolCallBlock,
+)
 from llama_index.core.llms import ChatMessage
 from llama_index.core.tools import BaseTool
 from llama_index.core.workflow import Context
 from llama_index.llms.openai import OpenAI
+from llama_index.llms.openai.utils import (
+    from_openai_message,
+    from_openai_token_logprobs,
+    to_openai_message_dicts,
+    update_tool_calls,
+)
 from llama_index.tools.mcp import BasicMCPClient, McpToolSpec
-
-from .utils import (
-    DEFAULT_JSON_HEADERS,
-    create_mcp_init_request,
-    parse_mcp_response,
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_chunk import (
+    ChatCompletionChunk,
+    ChoiceDelta,
+    ChoiceDeltaToolCall,
 )
 
 
-class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-ancestors
+class VllmRemote(OpenAI):
+    """Extended OpenAI class that supports base_url for remote vLLM servers.
+
+    This class extends OpenAI to work with remote vLLM servers that expose
+    OpenAI-compatible APIs. It uses base_url parameter (mapped to api_base)
+    and supports api_key for authentication. It also provides default metadata
+    for custom model names that aren't recognized by OpenAI's model registry.
+    """
+
+    def __init__(
+        self,
+        model: str = "ibm-granite/granite-3.3-2b-instruct",
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        temperature: float = 0.1,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize VllmRemote with base_url and api_key support.
+
+        Args:
+            model: Model name/identifier
+            base_url: Base URL of the remote vLLM server (e.g., "http://server:8000/v1")
+            api_key: API key for authentication (optional)
+            temperature: Sampling temperature
+            **kwargs: Additional arguments passed to OpenAI
+        """
+        if not base_url:
+            raise ValueError("base_url must be provided for VllmRemote")
+
+        # Store model name for metadata override (set before super().__init__)
+        object.__setattr__(self, "_custom_model_id", model)
+
+        # Initialize parent OpenAI class with api_base parameter
+        super().__init__(
+            model=model,
+            api_key=api_key or "",
+            api_base=base_url,
+            temperature=temperature,
+            **kwargs,
+        )
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        """Override metadata to provide context window for custom models."""
+        # Check if this is a custom model by trying to get parent metadata
+        # If it fails, we know it's a custom model
+        try:
+            # Try to get metadata from parent (works for known OpenAI models)
+            parent_metadata = super().metadata
+            # If we got here, it's a known model, return it
+            return parent_metadata
+        except (ValueError, AttributeError):
+            # For custom models, provide default metadata
+            model_name = getattr(self, "_custom_model_id", self.model)
+            return LLMMetadata(
+                context_window=8192,
+                num_output=2048,
+                is_chat_model=True,
+                is_function_calling_model=True,
+                model_name=model_name,
+            )
+
+    def _fix_tool_call_arguments(self, message_dict: Any) -> Any:
+        """Fix tool call arguments to be JSON strings instead of dicts.
+
+        The OpenAI API requires tool call arguments to be JSON strings, but
+        LlamaIndex sometimes sends them as dicts. This fixes that issue.
+        """
+        message_dict = dict(message_dict)  # Create a copy to avoid mutating original
+
+        # Handle tool_calls at top level
+        if "tool_calls" in message_dict:
+            tool_calls = message_dict["tool_calls"]
+            if isinstance(tool_calls, list):
+                fixed_tool_calls = []
+                for tool_call in tool_calls:
+                    fixed_tool_call = self._fix_single_tool_call(tool_call)
+                    fixed_tool_calls.append(fixed_tool_call)
+                message_dict["tool_calls"] = fixed_tool_calls
+
+        # Handle tool_calls nested in content array (for multimodal messages)
+        if "content" in message_dict and isinstance(message_dict["content"], list):
+            content = message_dict["content"]
+            fixed_content = []
+            for item in content:
+                if isinstance(item, dict) and "tool_calls" in item:
+                    item = dict(item)
+                    tool_calls = item["tool_calls"]
+                    if isinstance(tool_calls, list):
+                        fixed_tool_calls = [self._fix_single_tool_call(tc) for tc in tool_calls]
+                        item["tool_calls"] = fixed_tool_calls
+                fixed_content.append(item)
+            message_dict["content"] = fixed_content
+
+        return message_dict
+
+    def _fix_single_tool_call(self, tool_call: Any) -> Any:
+        """Fix a single tool call's arguments field."""
+        if not isinstance(tool_call, dict):
+            return tool_call
+
+        tool_call = dict(tool_call)  # Create a copy
+
+        if "function" in tool_call:
+            function = tool_call["function"]
+            if isinstance(function, dict) and "arguments" in function:
+                function = dict(function)
+                arguments = function["arguments"]
+                # If arguments is a dict, convert it to JSON string
+                if isinstance(arguments, dict):
+                    function["arguments"] = json.dumps(arguments)
+                    tool_call["function"] = function
+                # If arguments is already a string, leave it as is
+
+        return tool_call
+
+    async def _achat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> Any:
+        """Override _achat to fix tool call arguments before sending to API."""
+        # Convert messages to OpenAI format
+        message_dicts = to_openai_message_dicts(
+            messages,
+            model=self.model,
+        )
+        # Fix tool call arguments in each message
+        fixed_messages: List[Any] = [self._fix_tool_call_arguments(msg) for msg in message_dicts]
+
+        # Call parent's _achat with fixed messages by temporarily replacing the method
+        # We need to call the OpenAI client directly with fixed messages
+        aclient = self._get_aclient()
+        model_kwargs = self._get_model_kwargs(**kwargs)
+
+        if self.reuse_client:
+            response: Any = await aclient.chat.completions.create(messages=fixed_messages, stream=False, **model_kwargs)
+        else:
+            async with aclient:
+                response = await aclient.chat.completions.create(
+                    messages=fixed_messages,
+                    stream=False,
+                    **model_kwargs,
+                )
+
+        # Type narrowing: when stream=False, response is ChatCompletion, not AsyncStream
+        if not isinstance(response, ChatCompletion):
+            raise ValueError("Unexpected response type from chat.completions.create")
+
+        openai_message = response.choices[0].message
+        message = from_openai_message(openai_message, modalities=self.modalities or ["text"])
+        openai_token_logprobs = response.choices[0].logprobs
+        logprobs = None
+        if openai_token_logprobs and openai_token_logprobs.content:
+            logprobs = from_openai_token_logprobs(openai_token_logprobs.content)
+
+        return ChatResponse(
+            message=message,
+            raw=response,
+            logprobs=logprobs,
+            additional_kwargs=self._get_response_token_counts(response),
+        )
+
+    async def _astream_chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> Any:
+        """Override _astream_chat to fix tool call arguments before sending to API."""
+        # Convert messages to OpenAI format
+        message_dicts = to_openai_message_dicts(
+            messages,
+            model=self.model,
+        )
+        # Fix tool call arguments in each message
+        fixed_messages: List[Any] = [self._fix_tool_call_arguments(msg) for msg in message_dicts]
+
+        # Call parent's streaming method with fixed messages
+        aclient = self._get_aclient()
+
+        async def gen():
+            content = ""
+            tool_calls: List[ChoiceDeltaToolCall] = []
+
+            is_function = False
+            first_chat_chunk = True
+            async for response in await aclient.chat.completions.create(
+                messages=fixed_messages,
+                **self._get_model_kwargs(stream=True, **kwargs),
+            ):
+                blocks = []
+                response = cast(ChatCompletionChunk, response)
+                if len(response.choices) > 0:
+                    if (
+                        first_chat_chunk
+                        and response.choices[0].delta.content is None
+                        and response.choices[0].delta.tool_calls is None
+                    ):
+                        first_chat_chunk = False
+                        continue
+                    delta = response.choices[0].delta
+                else:
+                    delta = ChoiceDelta()
+                first_chat_chunk = False
+
+                if delta is None:
+                    continue
+
+                if delta.tool_calls:
+                    is_function = True
+
+                role = delta.role or MessageRole.ASSISTANT
+                content_delta = delta.content or ""
+                content += content_delta
+                blocks.append(TextBlock(text=content))
+
+                additional_kwargs = {}
+                if is_function:
+                    tool_calls = update_tool_calls(tool_calls, delta.tool_calls)
+                    if tool_calls:
+                        additional_kwargs["tool_calls"] = tool_calls
+                        for tool_call in tool_calls:
+                            if tool_call.function:
+                                blocks.append(
+                                    ToolCallBlock(
+                                        tool_call_id=tool_call.id,
+                                        tool_kwargs=tool_call.function.arguments or {},
+                                        tool_name=tool_call.function.name or "",
+                                    )
+                                )
+
+                yield ChatResponse(
+                    message=ChatMessage(role=role, blocks=blocks),
+                    raw=response,
+                    additional_kwargs=additional_kwargs,
+                )
+
+        return gen()
+
+
+class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
     """MCP agent wrapper that records tool calls and step progression.
 
     - Records tool calls for validation in tests
@@ -49,7 +294,6 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         self.model_id = model_id
         self.api_key = api_key
         self.tools: Optional[List[Union[BaseTool, Callable]]] = []
-        self.system_prompt = ""
         self.agent: Optional[FunctionAgent] = None
         self.context: Optional[Context] = None
 
@@ -60,12 +304,12 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         # Set up logging for debugging
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-        # Initialize LlamaIndex LLM
-        self.llama_llm = CustomLlamaIndexLLM(
-            api_url=api_url,
-            model_id=model_id,
+        # Initialize LlamaIndex LLM with native vLLM support for remote servers
+        self.llama_llm = VllmRemote(
+            model=model_id,
+            base_url=api_url,
             api_key=api_key,
-            system_prompt="You are a helpful assistant that can use tools to answer questions and perform tasks.",
+            temperature=0.1,
         )
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
@@ -86,38 +330,16 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
             # Support stdio transport by launching the server as a subprocess
             if self.server_url == "stdio":
                 mcp_client = BasicMCPClient("python", args=["-m", "insights_mcp.server", "stdio"])
-                # For stdio we cannot fetch HTTP instructions; leave system prompt empty
-                fetch_system_prompt = False
             else:
                 mcp_client = BasicMCPClient(self.server_url)
-                fetch_system_prompt = self.server_url.startswith("http")
 
             mcp_tool_spec = McpToolSpec(client=mcp_client)
             self.tools = await mcp_tool_spec.to_tool_list_async()
-
-            if fetch_system_prompt:
-                self.system_prompt = await self._get_system_prompt()
-            else:
-                self.system_prompt = ""
 
             logging.info("Initialized %d tools from MCP server", len(self.tools or []))
         except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error("Failed to initialize MCP tools: %s", e)
             raise
-
-    async def _get_system_prompt(self) -> str:
-        """Get system prompt from MCP server."""
-        try:
-            init_request = create_mcp_init_request()
-            response = requests.post(self.server_url, json=init_request, headers=DEFAULT_JSON_HEADERS, timeout=10)
-            if response.status_code == 200:
-                response_data = parse_mcp_response(response.text)
-                if isinstance(response_data, dict) and "result" in response_data:
-                    return response_data["result"].get("instructions", "")
-            return ""
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            self.logger.warning("Failed to get system prompt: %s", e)
-            return ""
 
     def _record_tool_call(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> None:
         """Record a tool call in a deepeval-compatible structure."""
@@ -211,7 +433,6 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         self.agent = FunctionAgent(
             name="MCP Agent",
             description="Agent with MCP tools",
-            system_prompt=self.system_prompt,
             llm=self.llama_llm,
             tools=self.tools,
         )
@@ -226,12 +447,8 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         max_iterations: int = 10,
     ) -> Tuple[str, List[Dict[str, Any]], List[Any], List[ChatMessage]]:  # pylint: disable=too-many-locals,too-many-arguments
         """Execute agent, record tool calls and steps, return response and artifacts."""
-        if chat_history is None or len(chat_history) == 0:
-            # ensure system prompt is included in chat history
-            if self.system_prompt:
-                chat_history = [ChatMessage(role="system", content=self.system_prompt)]
-            else:
-                chat_history = []
+        if chat_history is None:
+            chat_history = []
 
         if not self.agent or not self.context:
             raise ValueError("Agent or context not initialized")
@@ -288,36 +505,3 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
             self.logger.info("🔧 No tools called")
 
         return str(response), reasoning_steps, tools_called, updated_history
-
-    # Backwards-compat small helpers used by tests elsewhere
-    def get_all_checkpoints(self) -> Dict[str, List[Any]]:  # pylint: disable=too-few-public-methods
-        """No longer uses checkpoints; returns empty mapping for compatibility."""
-        return {}
-
-    def get_checkpoints_for_run(self, run_id: str) -> List[Any]:  # pylint: disable=unused-argument
-        """No longer uses checkpoints; returns empty list for compatibility."""
-        return []
-
-
-# Reuse the CustomLlamaIndexLLM from the original implementation
-# pylint: disable=too-few-public-methods,too-many-ancestors
-class CustomLlamaIndexLLM(OpenAI):
-    """Custom LlamaIndex LLM that wraps vLLM with OpenAI-compatible API."""
-
-    def __init__(self, api_url: str, model_id: str, api_key: str, system_prompt: str = "", **kwargs):
-        super().__init__(
-            model=model_id, api_key=api_key, api_base=api_url, temperature=kwargs.get("temperature", 0.1), **kwargs
-        )
-        self._custom_model_id = model_id
-        self._system_prompt = system_prompt
-
-    @property
-    def metadata(self):
-        """Override metadata to provide context window for custom models."""
-        return LLMMetadata(
-            context_window=8192,
-            num_output=2048,
-            is_chat_model=True,
-            is_function_calling_model=True,
-            model_name=self._custom_model_id,
-        )

@@ -22,7 +22,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "fastmcp>=2.10.1",
+    "fastmcp>=2.13.1",
     "requests",
     "PyJWT",
 ]
@@ -38,10 +38,10 @@ dev = [
     "pylint",
     "autopep8",
     "deepeval",
-    "llama-index",
-    "llama-index-core",
-    "llama-index-tools-mcp",
-    "llama-index-llms-openai",
+    "llama-index>=0.14.8",
+    "llama-index-core>=0.14.8",
+    "llama-index-tools-mcp>=0.4.3",
+    "llama-index-llms-openai>=0.6.9",
 ]
 
 [project.scripts]
@@ -95,5 +95,9 @@ testpaths = ["tests", "src"]
 
 [dependency-groups]
 dev = [
+    "llama-index>=0.14.8",
+    "llama-index-core>=0.14.8",
+    "llama-index-llms-openai>=0.6.9",
+    "llama-index-tools-mcp>=0.4.3",
     "pytest-subtests>=0.14.2",
 ]

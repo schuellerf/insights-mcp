@@ -186,13 +186,17 @@ def test_mcp_tools_include_descriptions_and_annotations(
     assert_mcp_tool_descriptions_and_annotations(mcp_tools, subtests, tool_name, expected_desc, params)
 
 
-@pytest.mark.parametrize("mcp_server_url", ["http", "sse"], indirect=True)
+@pytest.mark.parametrize(
+    "mcp_server_url",
+    [{"transport": "http", "toolset": "advisor"}, {"transport": "sse", "toolset": "advisor"}],
+    indirect=True,
+)
 def test_transport_types_with_get_active_rules(mcp_tools, request):
     """Test that http and sse transport types can start and expose get_active_rules tool."""
     assert_transport_types_expose_tool(mcp_tools, request, "advisor__get_active_rules")
 
 
-@pytest.mark.parametrize("mcp_server_url", ["stdio"], indirect=True)
+@pytest.mark.parametrize("mcp_server_url", [{"transport": "stdio", "toolset": "advisor"}], indirect=True)
 def test_stdio_transport_with_get_active_rules(mcp_tools):
     """Test stdio transport with get_active_rules tool using BasicMCPClient subprocess."""
     assert_stdio_transport_exposes_tool(mcp_tools, "advisor__get_active_rules")

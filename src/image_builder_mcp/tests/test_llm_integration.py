@@ -3,9 +3,10 @@ This includes easy questions to the LLM, that should work out of the box.
 Updated to use the simplified agent approach with WorkflowCheckpointer.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
+from deepeval.evaluate import assert_test
 from deepeval.metrics import GEval, ToolCorrectnessMetric
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams, ToolCall
 
@@ -21,6 +22,7 @@ TEST_IMAGE_BUILD_STATUS_PROMPT = "What is the status of my latest image build?"
 TEST_LLM_PAGING_PROMPT_1 = "List my latest 2 blueprints"
 TEST_LLM_PAGING_PROMPT_2 = "Can you show me the next 3 blueprints?"
 TEST_LIST_IMAGE_TYPES_PROMPT = "Which image types are available?"
+TEST_COMPLETE_CONVERSATION_FLOW_PROMPT = "Can you help me understand what blueprints are available?"
 
 # Test scenarios for tool usage patterns
 # not sure why mypy needs Any here
@@ -46,15 +48,65 @@ TOOL_USAGE_SCENARIOS: List[Dict[str, Any]] = [
 llm_configurations, _ = load_llm_configurations()
 
 
+def validate_tool_parameters(tool_name: str, input_parameters: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
+    """Validate tool parameters against expected schema.
+
+    Args:
+        tool_name: Name of the tool (e.g., "image-builder__get_composes")
+        input_parameters: Dictionary of parameters passed to the tool
+
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is None.
+    """
+    # Define valid parameters for each tool based on actual function signatures
+    valid_params: Dict[str, set[str]] = {
+        "image-builder__get_composes": {"limit", "offset", "search_string"},
+        "image-builder__get_blueprints": {"limit", "offset", "search_string"},
+        "image-builder__get_compose_details": {"compose_identifier"},
+        "image-builder__get_blueprint_details": {"blueprint_identifier"},
+        "image-builder__get_distributions": set(),
+        "image-builder__get_openapi": {"endpoints"},
+        "image-builder__create_blueprint": {"data"},
+        "image-builder__blueprint_compose": {"blueprint_uuid"},
+    }
+
+    if tool_name not in valid_params:
+        return True, None  # Unknown tool, skip validation
+
+    valid_set = valid_params[tool_name]
+    provided_set = set(input_parameters.keys()) if input_parameters else set()
+
+    invalid_params = provided_set - valid_set
+    if invalid_params:
+        return False, f"Invalid parameters for {tool_name}: {invalid_params}"
+
+    return True, None
+
+
 @pytest.mark.skipif(should_skip_llm_matrix_tests(), reason="No valid LLM configurations found")
-class TestLLMIntegrationEasy:
+class TestImageBuilderLLMIntegration:
     """Test LLM integration with MCP server using deepeval with multiple LLM configurations."""
 
     @pytest.mark.parametrize("llm_config", llm_configurations, ids=[config["name"] for config in llm_configurations])
+    @pytest.mark.parametrize(
+        "mock_insights_server",
+        ["src/image_builder_mcp/tests/fixtures/image_builder_llm_integration_mocks.yaml"],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("mcp_server_url", [{"transport": "http", "toolset": "image-builder"}], indirect=True)
     @pytest.mark.asyncio
-    # pylint: disable=redefined-outer-name,too-many-locals
-    async def test_rhel_initial_question(self, test_agent, guardian_agent, llm_config, verbose_logger):
-        """Test that LLM follows behavioral rules and doesn't immediately call create_blueprint."""
+    # pylint: disable=redefined-outer-name,too-many-locals,too-many-arguments,too-many-positional-arguments,unused-argument
+    async def test_rhel_initial_question(
+        self, test_agent, guardian_agent, llm_config, verbose_logger, mock_insights_server, mcp_server_url
+    ):
+        """Test that LLM follows behavioral rules and doesn't immediately call create_blueprint.
+
+        Uses mock_insights_server fixture which runs an in-process HTTP server.
+        To use a different mock config, parametrize the fixture:
+            @pytest.mark.parametrize("mock_insights_server",
+                ["src/image_builder_mcp/tests/fixtures/custom_mocks.yaml"],
+                indirect=True)
+        """
 
         prompt = TEST_RHEL_INITIAL_QUESTION_PROMPT
 
@@ -67,7 +119,7 @@ class TestLLMIntegrationEasy:
             f"❌ BEHAVIORAL RULE VIOLATION for {llm_config['name']} "
             f"({llm_config['MODEL_ID']}): "
             f"LLM called image-builder__create_blueprint immediately! Tool calls: {tool_names}. "
-            f"System prompt not working correctly.\nThe prompt was: {prompt}\n"
+            f"The prompt was: {prompt}\n"
             f"The response was: {response}\n"
         )
 
@@ -81,6 +133,7 @@ class TestLLMIntegrationEasy:
                 "Instead, it should either ask for more information about requirements (distributions, "
                 "architectures, image types etc.) or optionally use get_openapi to understand the system first."
                 "In any case the response should be targeted to the user for more information."
+                "Even asking single detail for refinement is fine"
             ),
             evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.TOOLS_CALLED],
             model=guardian_agent,
@@ -112,17 +165,48 @@ class TestLLMIntegrationEasy:
         verbose_logger.info("Reasoning steps captured: %d", len(reasoning_steps))
 
     @pytest.mark.parametrize("llm_config", llm_configurations, ids=[config["name"] for config in llm_configurations])
+    @pytest.mark.parametrize(
+        "mock_insights_server",
+        ["src/image_builder_mcp/tests/fixtures/image_builder_llm_integration_mocks.yaml"],
+        indirect=True,
+    )
+    @pytest.mark.parametrize(
+        "mcp_server_url",
+        [
+            {"transport": "http", "toolset": "image-builder"},
+            # toolset-all fails for granite - out of context? Subject to fix!
+            # e.g. introduce mcp-prompts to shrink tooldescriptions/context usage
+            # {"transport": "http", "toolset": "all"}
+        ],
+        ids=[
+            "toolset-image-builder",
+            # "toolset-all",
+        ],
+        indirect=True,
+    )
     @pytest.mark.asyncio
-    # pylint: disable=redefined-outer-name,too-many-locals
-    async def test_image_build_status_tool_selection(self, test_agent, verbose_logger, llm_config, guardian_agent):
+    # pylint: disable=redefined-outer-name,too-many-locals,too-many-arguments,too-many-positional-arguments,unused-argument
+    async def test_image_build_status_tool_selection(
+        self, test_agent, verbose_logger, llm_config, guardian_agent, mock_insights_server, mcp_server_url
+    ):
         """Test that LLM selects appropriate tools for image build status queries."""
 
-        # Define tool correctness metric - ToolCorrectnessMetric doesn't support model parameter
+        # Define tool correctness metric - model can be set as attribute after creation
         tool_correctness = ToolCorrectnessMetric(threshold=0.7, include_reason=True)
+        tool_correctness.model = guardian_agent
 
         prompt = TEST_IMAGE_BUILD_STATUS_PROMPT
 
         response, _, tools_executed, _ = await test_agent.execute_with_reasoning(prompt, chat_history=[])
+
+        # Validate tool parameters
+        for tool in tools_executed:
+            is_valid, error_msg = validate_tool_parameters(tool.name, tool.input_parameters)
+            assert is_valid, (
+                f"❌ PARAMETER VALIDATION ERROR for {llm_config['name']} ({llm_config['MODEL_ID']}): "
+                f"{error_msg}. "
+                f"Tool: {tool.name}, Parameters: {tool.input_parameters}"
+            )
 
         # first we check if there is a question in the response for the name or UUID of the compose
         contains_question = GEval(
@@ -207,12 +291,30 @@ class TestLLMIntegrationEasy:
     @pytest.mark.parametrize(
         "scenario", TOOL_USAGE_SCENARIOS, ids=[scenario["prompt"] for scenario in TOOL_USAGE_SCENARIOS]
     )
+    @pytest.mark.parametrize(
+        "mock_insights_server",
+        ["src/image_builder_mcp/tests/fixtures/image_builder_llm_integration_mocks.yaml"],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("mcp_server_url", [{"transport": "http", "toolset": "image-builder"}], indirect=True)
     @pytest.mark.asyncio
-    # pylint: disable=redefined-outer-name
-    async def test_tool_usage_patterns(self, test_agent, verbose_logger, llm_config, scenario):
+    # pylint: disable=redefined-outer-name,too-many-arguments,too-many-positional-arguments,too-many-locals,unused-argument
+    async def test_tool_usage_patterns(
+        self, test_agent, verbose_logger, llm_config, scenario, mock_insights_server, mcp_server_url
+    ):
         """Test various tool usage patterns and their appropriateness."""
 
         response, _, tools_executed, _ = await test_agent.execute_with_reasoning(scenario["prompt"], chat_history=[])
+
+        # Validate tool parameters
+        for tool in tools_executed:
+            is_valid, error_msg = validate_tool_parameters(tool.name, tool.input_parameters)
+            assert is_valid, (
+                f"❌ PARAMETER VALIDATION ERROR for {llm_config['name']} ({llm_config['MODEL_ID']}): "
+                f"{error_msg}. "
+                f"Tool: {tool.name}, Parameters: {tool.input_parameters}"
+            )
+
         expected_tools = [ToolCall(name=name) for name in scenario["expected_tools"]]
 
         test_case = LLMTestCase(
@@ -251,8 +353,17 @@ class TestLLMIntegrationEasy:
         )
 
     @pytest.mark.parametrize("llm_config", llm_configurations, ids=[config["name"] for config in llm_configurations])
+    @pytest.mark.parametrize(
+        "mock_insights_server",
+        ["src/image_builder_mcp/tests/fixtures/image_builder_llm_integration_mocks.yaml"],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("mcp_server_url", [{"transport": "http", "toolset": "image-builder"}], indirect=True)
     @pytest.mark.asyncio
-    async def test_llm_paging(self, test_agent, verbose_logger, llm_config):  # pylint: disable=redefined-outer-name,too-many-locals
+    # pylint: disable=redefined-outer-name,too-many-locals,too-many-arguments,too-many-positional-arguments,unused-argument
+    async def test_llm_paging(
+        self, test_agent, guardian_agent, verbose_logger, llm_config, mock_insights_server, mcp_server_url
+    ):
         """Test that the LLM can page through results."""
 
         prompt = TEST_LLM_PAGING_PROMPT_1
@@ -260,12 +371,23 @@ class TestLLMIntegrationEasy:
         response, _, tools_executed, conversation_history = await test_agent.execute_with_reasoning(
             prompt, chat_history=[]
         )
+
+        # Validate tool parameters
+        for tool in tools_executed:
+            is_valid, error_msg = validate_tool_parameters(tool.name, tool.input_parameters)
+            assert is_valid, (
+                f"❌ PARAMETER VALIDATION ERROR for {llm_config['name']} ({llm_config['MODEL_ID']}): "
+                f"{error_msg}. "
+                f"Tool: {tool.name}, Parameters: {tool.input_parameters}"
+            )
+
         expected_tools = [ToolCall(name="image-builder__get_blueprints")]
 
         test_case_initial = LLMTestCase(
             input=prompt, actual_output=response, tools_called=tools_executed, expected_tools=expected_tools
         )
         tool_correctness = ToolCorrectnessMetric(threshold=0.6)
+        tool_correctness.model = guardian_agent
 
         # Measure once to get access to explanation and avoid double LLM call
         tool_correctness.measure(test_case_initial)
@@ -294,6 +416,15 @@ class TestLLMIntegrationEasy:
             updated_chat_history,
         ) = await test_agent.execute_with_reasoning(follow_up_prompt, chat_history=conversation_history)
 
+        # Validate tool parameters for follow-up call
+        for tool in tools_executed:
+            is_valid, error_msg = validate_tool_parameters(tool.name, tool.input_parameters)
+            assert is_valid, (
+                f"❌ PARAMETER VALIDATION ERROR for {llm_config['name']} ({llm_config['MODEL_ID']}): "
+                f"{error_msg}. "
+                f"Tool: {tool.name}, Parameters: {tool.input_parameters}"
+            )
+
         pretty_print_chat_history(updated_chat_history, llm_config["name"], verbose_logger)
 
         expected_tools = [ToolCall(name="image-builder__get_blueprints", arguments={"limit": 3, "offset": 2})]
@@ -302,6 +433,7 @@ class TestLLMIntegrationEasy:
             input=follow_up_prompt, actual_output=response, tools_called=tools_executed, expected_tools=expected_tools
         )
         tool_correctness = ToolCorrectnessMetric(threshold=0.6)
+        tool_correctness.model = guardian_agent
 
         verbose_logger.info("🤔 Checking tool correctness")
 
@@ -322,9 +454,17 @@ class TestLLMIntegrationEasy:
         )
 
     @pytest.mark.parametrize("llm_config", llm_configurations, ids=[config["name"] for config in llm_configurations])
+    @pytest.mark.parametrize(
+        "mock_insights_server",
+        ["src/image_builder_mcp/tests/fixtures/image_builder_llm_integration_mocks.yaml"],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("mcp_server_url", [{"transport": "http", "toolset": "image-builder"}], indirect=True)
     @pytest.mark.asyncio
-    # pylint: disable=redefined-outer-name,too-many-locals
-    async def test_list_image_types(self, test_agent, guardian_agent, llm_config, verbose_logger):
+    # pylint: disable=redefined-outer-name,too-many-locals,too-many-arguments,too-many-positional-arguments,unused-argument
+    async def test_list_image_types(
+        self, test_agent, guardian_agent, llm_config, verbose_logger, mock_insights_server, mcp_server_url
+    ):
         """Test that LLM follows behavioral rules and doesn't immediately call create_blueprint."""
 
         prompt = TEST_LIST_IMAGE_TYPES_PROMPT
@@ -338,7 +478,7 @@ class TestLLMIntegrationEasy:
             f"❌ BEHAVIORAL RULE VIOLATION for {llm_config['name']} "
             f"({llm_config['MODEL_ID']}): "
             f"LLM called image-builder__create_blueprint immediately! Tool calls: {tool_names}. "
-            f"System prompt not working correctly.\nThe prompt was: {prompt}\n"
+            f"The prompt was: {prompt}\n"
             f"The response was: {response}\n"
         )
 
@@ -379,3 +519,54 @@ class TestLLMIntegrationEasy:
         verbose_logger.info("Response: %s", response)
         verbose_logger.info("Tool calls executed: %s", [tool.name for tool in tools_executed])
         verbose_logger.info("Reasoning steps captured: %d", len(reasoning_steps))
+
+    @pytest.mark.parametrize("llm_config", llm_configurations, ids=[config["name"] for config in llm_configurations])
+    @pytest.mark.parametrize(
+        "mock_insights_server",
+        ["src/image_builder_mcp/tests/fixtures/image_builder_llm_integration_mocks.yaml"],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("mcp_server_url", [{"transport": "http", "toolset": "image-builder"}], indirect=True)
+    @pytest.mark.asyncio
+    # pylint: disable=redefined-outer-name,unused-argument,too-many-arguments,too-many-positional-arguments
+    async def test_complete_conversation_flow(
+        self, test_agent, guardian_agent, verbose_logger, llm_config, mock_insights_server, mcp_server_url
+    ):
+        """Test complete conversation flow with proper agent behavior."""
+
+        prompt = TEST_COMPLETE_CONVERSATION_FLOW_PROMPT
+
+        response, _, tools_executed, _ = await test_agent.execute_with_reasoning(prompt, chat_history=[])
+
+        expected_tools = [ToolCall(name="image-builder__get_blueprints")]
+
+        test_case = LLMTestCase(
+            input=prompt, actual_output=response, tools_called=tools_executed, expected_tools=expected_tools
+        )
+
+        # Define conversation flow metric using custom LLM
+        conversation_quality = GEval(
+            name="Conversation Flow Quality",
+            criteria=(
+                "The conversation should demonstrate proper agent behavior:\n"
+                "1. Understanding user intent\n"
+                "2. Using appropriate tools to gather information or providing helpful and informative responses\n"
+                "3. The 'content' of the conversation contains only json then this is considered a failure\n"
+                "4. Take care that tool calls are properly part of a 'tool_call' object\n"
+            ),
+            evaluation_params=[
+                LLMTestCaseParams.INPUT,
+                LLMTestCaseParams.ACTUAL_OUTPUT,
+                LLMTestCaseParams.TOOLS_CALLED,
+            ],
+            model=guardian_agent,
+        )
+
+        # Add a strict tool correctness check to fail when expected tools are not called
+        tool_correctness = ToolCorrectnessMetric(threshold=0.6)
+
+        verbose_logger.info("🤔 Checking response with guardian agent %s…", guardian_agent.model_id)
+        # Evaluate with deepeval metrics
+        assert_test(test_case, [conversation_quality, tool_correctness])
+
+        verbose_logger.info("✓ Complete conversation flow test passed for %s", llm_config["name"])

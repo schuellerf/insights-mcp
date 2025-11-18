@@ -1,0 +1,7 @@
+openapi:
+  - name: vulnerability
+    url: https://console.redhat.com/api/vulnerability/v1/openapi.json
+    dst: src/vulnerability_mcp/tests/vulnerability-openapi.json
+  - name: image-builder
+    url: https://console.redhat.com/api/image-builder/v1/openapi.json
+    dst: src/image_builder_mcp/tests/image-builder-openapi.json
