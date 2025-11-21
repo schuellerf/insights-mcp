@@ -92,6 +92,9 @@ indent-style = "space"
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests", "src"]
+markers = [
+    "integration: marks tests as integration tests that interact with external APIs (deselect with '-m \"not integration\"')",
+]
 
 [dependency-groups]
 dev = [
