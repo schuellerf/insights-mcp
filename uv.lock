@@ -1281,7 +1281,7 @@ wheels = [
 
 [[package]]
 name = "insights-mcp"
-version = "0.0.0"
+version = "0.0.0-dev"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },

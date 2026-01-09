@@ -38,7 +38,7 @@ build-prod: generate-docs ## Build the container image but with the upstream tag
 
 # please set from outside
 CONTAINER_IMAGE ?= ghcr.io/redhatinsights/$(IMAGE_NAME):latest
-TAG ?= v0.0.0-dev
+TAG ?= v0.0.0.dev0
 VERSION ?= $(TAG)
 
 .PHONY: build-claude-extension

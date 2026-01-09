@@ -46,7 +46,7 @@ TAG=1.2.3 make build  # Uses version 1.2.3
 ```bash
 # Default version
 python -c "from src.insights_mcp import __version__; print(__version__)"
-# Output: 0.0.0
+# Output: 0.0.0.dev0
 
 # With environment override
 INSIGHTS_MCP_VERSION="1.2.3" python -c "from src.insights_mcp import __version__; print(__version__)"
