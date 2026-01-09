@@ -75,6 +75,66 @@ Here is the rendered version: [Deployment Flow](docs/architecture-deployment.svg
 
 **Note**: To regenerate the `SVG` diagram images, run `make generate-docs`. The diagrams are also rendered directly by GitHub when viewing this file.
 
+## Header-Based Authentication Architecture
+
+The Insights MCP server supports **per-request authentication** using HTTP headers for HTTP and SSE transports, enabling multi-user scenarios.
+
+### Authentication Modes
+
+The server implements three authentication modes:
+
+1. **STDIO with Environment Variables** (default):
+   - Credentials: `LIGHTSPEED_CLIENT_ID` and `LIGHTSPEED_CLIENT_SECRET` environment variables
+   - Scope: Process-wide
+   - Use case: Local development, single-user desktop integrations
+
+2. **HTTP/SSE with Environment Variables** (development only):
+   - Credentials: Same as STDIO mode
+   - Scope: Process-wide
+   - ⚠️ **NOT production-safe**: Server emits warning at startup
+   - Use case: Development and testing only
+
+3. **HTTP/SSE with Per-Request Headers** (production-recommended):
+   - Credentials: `lightspeed-client-id` and `lightspeed-client-secret` HTTP headers
+   - Scope: Per-request
+   - ✅ **Production-safe**: Enables multi-user scenarios
+   - Use case: Production deployments, multi-tenant services
+
+### Credential Priority
+
+When both environment variables and headers are available, the priority is:
+
+1. Environment variables (if set) - used for all requests
+2. HTTP headers (if environment variables are not set) - extracted per-request
+
+This ensures backward compatibility while enabling new multi-user capabilities.
+
+### Multi-User Architecture
+
+For HTTP/SSE transports without environment credentials, the server:
+
+1. Extracts credentials from request headers using `get_http_headers()`
+2. Uses local variables (not instance state) to maintain thread safety
+3. Passes credentials directly to OAuth2 token endpoint
+4. Isolates each request's authentication state
+
+**Thread Safety**: The implementation uses request-scoped local variables to avoid race conditions in concurrent multi-user scenarios.
+
+### Security Considerations
+
+- **Credential Masking**: All `client_secret` values are masked in logs (shows only first 10 and last 6 characters)
+- **Production Warning**: Server emits `WARNING: THIS SHOULD NOT BE USED IN PRODUCTION!` when HTTP/SSE uses environment credentials
+- **Transport Restriction**: Header-based auth only works for HTTP/SSE transports (not STDIO)
+
+### Implementation Details
+
+Key components for header-based authentication:
+
+- **`InsightsOAuth2Client._get_credentials_from_headers()`**: Extracts credentials from HTTP headers with transport validation
+- **`InsightsOAuth2Client.refresh_auth()`**: Implements priority logic and thread-safe token fetching
+- **`setup_credentials()`**: Validates configuration and emits production warnings
+- **`BRAND_CLIENT_ID_HEADER` / `BRAND_CLIENT_SECRET_HEADER`**: Dynamic header names based on `CONTAINER_BRAND`
+
 ## Important notes
 * When changing some code you might want to use `make build-prod` so the container is built with
   the upstream container tag and you don't need to change it in your MCP client (like VSCode).

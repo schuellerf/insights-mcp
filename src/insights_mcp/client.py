@@ -162,11 +162,31 @@ class InsightsClientBase(httpx.AsyncClient):
             "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401", "relevant MCP functions"
         )
         if self.mcp_transport in ["sse", "http"]:
+            # Detect which auth method is actually in use
+            # Check if environment credentials are configured (client_id or client_secret)
+            has_env_creds = bool(getattr(self, "client_id", None) or getattr(self, "client_secret", None))
+
+            if has_env_creds:
+                # Environment credentials are set but invalid
+                return (
+                    f"{base_message}environment credentials `{BRAND_CLIENT_ID_ENV}` and/or "
+                    f"`{BRAND_CLIENT_SECRET_ENV}` which are currently configured but **invalid**.\n"
+                    "Please check that your service account credentials are correct. "
+                    "Here is the direct link for the user's convenience: "
+                    f"[{self.insights_base_url}/iam/service-accounts]({self.insights_base_url}/iam/service-accounts)\n"
+                    "⚠️ Note: Using environment credentials with HTTP/SSE is not recommended for production. "
+                    "Consider using OAuth proxy mode or per-request header authentication instead.\n"
+                    "Come up with a detailed description of this for the user. "
+                    "Only describe this, don't expose details about the tool function itself. "
+                    f"Don't proceed with the request before this is fixed. {error_message}"
+                )
+            # No environment credentials - must be using headers
             return (
-                f"{base_message}header variables `{BRAND_CLIENT_ID_HEADER}` and "
-                f"`{BRAND_CLIENT_SECRET_HEADER}` in your request.\n"
+                f"{base_message}per-request header credentials `{BRAND_CLIENT_ID_HEADER}` and "
+                f"`{BRAND_CLIENT_SECRET_HEADER}` which are **invalid or missing** in your request.\n"
+                "Please ensure valid service account credentials are included in the request headers. "
                 "Here is the direct link for the user's convenience: "
-                f"[{self.insights_base_url}/iam/service-accounts]({self.insights_base_url}/iam/service-accounts) "
+                f"[{self.insights_base_url}/iam/service-accounts]({self.insights_base_url}/iam/service-accounts)\n"
                 "Come up with a detailed description of this for the user. "
                 "Only describe this, don't expose details about the tool function itself. "
                 f"Don't proceed with the request before this is fixed. {error_message}"
@@ -280,9 +300,70 @@ class InsightsOAuth2Client(InsightsClientBase, AsyncOAuth2Client):
             proxy=self.proxy_url,
         )
         self.oauth_enabled = oauth_enabled
+        self.token_endpoint = token_endpoint
+
+    def _get_credentials_from_headers(self) -> tuple[str | None, str | None]:
+        """Extract authentication credentials from HTTP headers.
+
+        This method supports per-request authentication for SSE/HTTP transports by reading
+        credentials from branded headers (e.g., 'insights-client-id', 'lightspeed-client-id').
+
+        Only works for SSE/HTTP transports. STDIO transport does not support header-based auth.
+
+        Returns:
+            Tuple of (client_id, client_secret) if found in headers, or (None, None) otherwise.
+
+        Note:
+            client_secret is masked in debug logs for security.
+        """
+        # Only extract headers for SSE/HTTP transports
+        if self.mcp_transport not in ["sse", "http"]:
+            self.logger.debug(
+                "Header-based auth not available for transport: %s (only SSE/HTTP supported)", self.mcp_transport
+            )
+            return None, None
+
+        try:
+            headers = get_http_headers()
+            client_id = headers.get(BRAND_CLIENT_ID_HEADER)
+            client_secret = headers.get(BRAND_CLIENT_SECRET_HEADER)
+
+            if client_id or client_secret:
+                # Mask client_secret for logging
+                masked_secret = "***NOT_SET***"
+                if client_secret:
+                    if len(client_secret) > 20:
+                        masked_secret = f"{client_secret[:10]}...{client_secret[-6:]}"
+                    else:
+                        masked_secret = "***MASKED***"
+
+                self.logger.debug(
+                    "Extracted credentials from headers: client_id=%s, client_secret=%s",
+                    client_id or "***NOT_SET***",
+                    masked_secret,
+                )
+                return client_id, client_secret
+
+            self.logger.debug("No credentials found in request headers")
+            return None, None
+
+        except (RuntimeError, KeyError, AttributeError) as e:
+            self.logger.debug("Failed to extract credentials from headers: %s", e)
+            return None, None
 
     async def refresh_auth(self) -> None:
-        """Refresh the authentication token."""
+        """Refresh the authentication token.
+
+        Supports per-request credentials from HTTP headers as fallback when
+        instance credentials are not set. This enables multi-user scenarios
+        for SSE/HTTP transports.
+
+        Priority order:
+        1. Instance credentials (from environment variables)
+        2. Request headers (for SSE/HTTP only)
+
+        Thread-safety: Uses local variables to avoid mutating instance state.
+        """
         if self.oauth_enabled:  # TODO: unify client oauth and oauth middleware
             self.logger.info("OAuth is enabled, skipping token management")
             caller_headers_auth = get_http_headers().get("authorization")
@@ -292,11 +373,40 @@ class InsightsOAuth2Client(InsightsClientBase, AsyncOAuth2Client):
                 self.headers["authorization"] = caller_headers_auth
         elif "access_token" not in self.token or self.token.is_expired():
             self.logger.info("Token is expired, refreshing token")
+
+            # Get credentials: instance vars take priority, then fall back to headers
+            client_id = self.client_id
+            client_secret = self.client_secret
+
+            # If no instance credentials, try to get from headers (SSE/HTTP only)
+            if not client_id or not client_secret:
+                header_client_id, header_client_secret = self._get_credentials_from_headers()
+                if header_client_id:
+                    client_id = header_client_id
+                if header_client_secret:
+                    client_secret = header_client_secret
+                self.logger.debug("Using header-based credentials for this request")
+
+            # Validate we have credentials
+            if not client_id or not client_secret:
+                if "refresh_token" not in self.token:
+                    raise ValueError(self.no_auth_error(ValueError("No credentials available for authentication")))
+
             try:
                 if "refresh_token" in self.token:
+                    # Use refresh token flow
                     await self.refresh_token()
                 else:
-                    await self.fetch_token()
+                    # Use client credentials flow with per-request credentials
+                    # Thread-safe: fetch_token creates new token without mutating client state
+                    if client_id != self.client_id or client_secret != self.client_secret:
+                        # Using header-based credentials, pass them directly
+                        await self.fetch_token(
+                            url=self.token_endpoint, client_id=client_id, client_secret=client_secret
+                        )
+                    else:
+                        # Using instance credentials, use default behavior
+                        await self.fetch_token()
             except OAuthError as e:
                 raise ValueError(self.no_auth_error(e)) from e
 
@@ -304,6 +414,7 @@ class InsightsOAuth2Client(InsightsClientBase, AsyncOAuth2Client):
         """Make an HTTP request with OAuth2 token management.
 
         Handles token refresh when needed and supports OAuth middleware.
+        Supports per-request credentials from headers for SSE/HTTP transports.
 
         Args:
             fn: HTTP method function to call
@@ -313,9 +424,14 @@ class InsightsOAuth2Client(InsightsClientBase, AsyncOAuth2Client):
         Returns:
             JSON response data or error information
         """
-        if not self.oauth_enabled and self.refresh_token is None and self.client_secret is None:
+        # Check if we have any credentials (instance or potentially from headers)
+        has_instance_credentials = self.refresh_token is not None or self.client_secret is not None
+        can_use_headers = self.mcp_transport in ["sse", "http"]
+
+        if not self.oauth_enabled and not has_instance_credentials and not can_use_headers:
             return self.no_auth_error(ValueError("Client not authenticated"))
 
+        # refresh_auth will handle extracting credentials from headers if needed
         await self.refresh_auth()
 
         return await super().make_request(fn, *args, **kwargs)
@@ -517,7 +633,16 @@ class InsightsOAuthProxyClient(InsightsClientBase, AsyncOAuth2Client):
             self.logger.debug("Request headers received:")
             for header_name, header_value in request_headers.items():
                 # Security: mask sensitive headers but keep them in debug info
-                if header_name.lower() in ["authorization", "x-api-key", "bearer"]:
+                # Mask: authorization, API keys, and client secrets
+                sensitive_headers = [
+                    "authorization",
+                    "x-api-key",
+                    "bearer",
+                    BRAND_CLIENT_SECRET_HEADER.lower(),
+                    "insights-client-secret",
+                    "lightspeed-client-secret",
+                ]
+                if header_name.lower() in sensitive_headers:
                     if len(header_value) > 20:
                         masked_value = f"{header_value[:10]}...{header_value[-6:]}"
                     else:

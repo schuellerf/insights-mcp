@@ -62,6 +62,49 @@ For a deployment where you connect to this MCP server from a different machine, 
 
 In both cases if you are in doubt, please disable/remove the `LIGHTSPEED_CLIENT_ID` and `LIGHTSPEED_CLIENT_SECRET` from your account after you are done using the MCP server.
 
+### Header-Based Authentication (HTTP/SSE Transports)
+
+For HTTP and SSE transports, the MCP server supports **per-request authentication** using HTTP headers, enabling multi-user scenarios where each request can have different credentials.
+
+#### Authentication Priority
+
+The server uses the following priority order for credentials:
+
+1. **Environment variables** (process-wide): `LIGHTSPEED_CLIENT_ID` and `LIGHTSPEED_CLIENT_SECRET`
+2. **HTTP headers** (per-request): `lightspeed-client-id` and `lightspeed-client-secret`
+
+#### When to Use Header-Based Authentication
+
+- ✅ **Production deployments** with HTTP/SSE transports (recommended)
+- ✅ **Multi-user scenarios** where different requests use different credentials
+- ✅ **Security-sensitive environments** where credentials should not be stored in environment variables
+
+#### When to Use Environment Variables
+
+- ✅ **STDIO transport** (only option available)
+- ✅ **Development environments** with HTTP/SSE transports
+- ⚠️ **NOT recommended** for production HTTP/SSE deployments
+
+#### Production Warning
+
+**⚠️ IMPORTANT**: Using environment-based credentials with HTTP/SSE transports is **NOT production-safe**. The server will emit a warning at startup if this configuration is detected.
+
+For production deployments with HTTP/SSE, use either:
+- OAuth proxy mode (with `OAUTH_ENABLED=true`), OR
+- Per-request header-based authentication
+
+#### Example: Header-Based Authentication
+
+```bash
+# Start server in HTTP mode (no environment credentials)
+podman run -p 8000:8000 --rm ghcr.io/redhatinsights/red-hat-lightspeed-mcp:latest http --host 0.0.0.0
+
+# Make request with credentials in headers
+curl -H "lightspeed-client-id: your-client-id" \
+     -H "lightspeed-client-secret: your-client-secret" \
+     http://localhost:8000/mcp
+```
+
 ## Integrations
 
 ### Stage usage

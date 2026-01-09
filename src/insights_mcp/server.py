@@ -310,10 +310,23 @@ def setup_credentials(mcp_server_config: dict, logger: logging.Logger) -> None:
             }
         )
         if not any(mcp_server_config.get(k) for k in ("client_id", "client_secret", "refresh_token")):
-            logger.error("Service account credentials are required for Insights authentication")
-            # Don't exit the program to allow the user to continue using the server without credentials
-            # sys.exit(1)
-        logger.info("Using Insights Client ID: %s", mcp_server_config["client_id"])
+            logger.info(
+                "No environment-based credentials configured. "
+                "For SSE/HTTP transports, credentials can be provided via request headers."
+            )
+        else:
+            logger.info("Using Insights Client ID: %s", mcp_server_config["client_id"])
+
+            # Warn about production deployment with env-based credentials on HTTP/SSE
+            transport = mcp_server_config.get("mcp_transport", "stdio")
+            if transport in ["http", "sse"]:
+                logger.warning(
+                    "WARNING: Using environment-based credentials with %s transport. "
+                    "THIS SHOULD NOT BE USED IN PRODUCTION! "
+                    "For production deployments, use OAuth proxy mode (OAUTH_ENABLED=true) "
+                    "or per-request header-based authentication.",
+                    transport.upper(),
+                )
 
 
 def get_mcp_version() -> str:

@@ -53,9 +53,15 @@ SSO_AUTHORIZED_MCP_SERVER_HOST_PORTS = [
 CONTAINER_BRAND = os.getenv("CONTAINER_BRAND", "insights")
 # Strip "red-hat-" prefix if present (e.g., "red-hat-lightspeed" -> "lightspeed")
 _brand_prefix = CONTAINER_BRAND.replace("red-hat-", "")
-# Derive variable names dynamically for error messages
+
+# Derive variable names dynamically for error messages and authentication
+# Environment variables (process-wide, set at startup)
 BRAND_CLIENT_ID_ENV = f"{_brand_prefix.upper()}_CLIENT_ID"
 BRAND_CLIENT_SECRET_ENV = f"{_brand_prefix.upper()}_CLIENT_SECRET"
+
+# HTTP headers (per-request, for SSE/HTTP transports only)
+# Used for multi-user scenarios where each request can have different credentials
+# Priority: Environment variables take precedence over headers
 BRAND_CLIENT_ID_HEADER = f"{_brand_prefix.lower()}-client-id"
 BRAND_CLIENT_SECRET_HEADER = f"{_brand_prefix.lower()}-client-secret"
 
