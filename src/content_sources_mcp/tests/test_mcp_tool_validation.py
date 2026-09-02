@@ -4,7 +4,7 @@ This module provides parametrized tests for content-sources tools using
 the reusable test patterns from the top-level tests package.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -24,7 +24,12 @@ from tests.test_patterns import (
             "List repositories with filtering and pagination options.",
             {
                 "limit": {
-                    "description": "Maximum number of repositories to return (default: 10).",
+                    "description": (
+                        "Maximum number of repositories to return (default: 10, maximum: 100). "
+                        "**ALWAYS use the default value of 10 for the first call.** "
+                        "This default is carefully chosen for performance and context management. "
+                        "Only increase this value if the user explicitly asks to see more repositories at once."
+                    ),
                     "default": 10,
                     "type": "integer",
                     "anyOf": None,
@@ -77,6 +82,12 @@ from tests.test_patterns import (
                     "type": "string",
                     "anyOf": None,
                 },
+                "include_gpg_key": {
+                    "description": "Include GPG key content in the response (default: False).",
+                    "default": False,
+                    "type": "boolean",
+                    "anyOf": None,
+                },
             },
         ),
     ],
@@ -87,7 +98,7 @@ def test_mcp_tools_include_descriptions_and_annotations(
     subtests,
     tool_name: str,
     expected_desc: str,
-    params: Dict[str, Dict[str, Any]],
+    params: dict[str, dict[str, Any]],
 ):  # pylint: disable=redefined-outer-name
     """Test that the content-sources MCP tools include descriptions and annotations."""
     assert_mcp_tool_descriptions_and_annotations(mcp_tools, subtests, tool_name, expected_desc, params)

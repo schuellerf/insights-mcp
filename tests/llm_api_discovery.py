@@ -165,9 +165,9 @@ async def discover_satellite_tag(client: InsightsClient, host_id: str) -> str | 
     if isinstance(response, str):
         return None
     results = response.get("results")
-    if not isinstance(results, list) or not results:
+    if not isinstance(results, dict) or not results.get(host_id):
         return None
-    tag = results[0]
+    tag = results[host_id][0]
     if not isinstance(tag, dict):
         return None
     namespace = tag.get("namespace")
@@ -185,21 +185,10 @@ async def discover_rule_id(client: InsightsClient) -> str | None:
 
 
 async def discover_rbac_username(client: InsightsClient) -> str | None:
-    """Pick a username from cross-application access data, if present."""
-    response = await client.get("access/", params={"application": "", "limit": 50, "offset": 0})
-    if isinstance(response, str):
-        return None
-    for key in ("data", "items", "results"):
-        items = response.get(key)
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            for f in ("username", "principal", "account_username"):
-                value = item.get(f)
-                if isinstance(value, str) and value and value != "service-account":
-                    return value
+    """Return the service account username derived from credentials."""
+    client_id, _ = _insights_credentials()
+    if client_id:
+        return f"service-account-{client_id}"
     return None
 
 

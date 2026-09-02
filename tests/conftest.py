@@ -1,11 +1,12 @@
 """Pytest configuration and common fixtures."""
 
 import asyncio
+import functools
 import logging
 from contextlib import contextmanager
-from typing import Dict
 from unittest.mock import Mock, patch
 
+import nest_asyncio
 import pytest
 import pytest_asyncio
 
@@ -28,8 +29,11 @@ from tests.llama_index_support.agent_mcp import MCPAgentWrapper
 from tests.llm_tracing import enable_llm_test_tracing
 from tests.utils import load_llm_configurations
 
+# Prevent Python 3.14 event loop corruption caused by deepeval calling nest_asyncio.apply()
+nest_asyncio.apply = lambda: None
 
-def gpt_model_from_config(config: Dict[str, str]) -> GPTModel:
+
+def gpt_model_from_config(config: dict[str, str]) -> GPTModel:
     """Build deepeval GPTModel for OpenAI-compatible endpoints from test config."""
     return GPTModel(
         model=config["MODEL_ID"],
@@ -62,7 +66,7 @@ def llm_test_tracing(request):
     yield
 
 
-def _insights_mcp_http_headers() -> Dict[str, str] | None:
+def _insights_mcp_http_headers() -> dict[str, str] | None:
     """HTTP headers for Insights MCP when service account credentials are in the environment."""
     if INSIGHTS_CLIENT_ID and INSIGHTS_CLIENT_SECRET:
         return {
@@ -226,54 +230,24 @@ def create_mock_client(client_id=TEST_CLIENT_ID, client_secret=TEST_CLIENT_SECRE
     return client
 
 
-# No server-specific fixtures needed!
-# Tests can import the server class directly and use create_mcp_server(ServerClass)
-
-
 @contextmanager
-# pylint: disable=too-many-arguments,too-many-positional-arguments
-def setup_mcp_mock(
-    server_module,
-    mcp_server,
-    mock_client,
-    mock_response=None,
-    side_effect=None,
-    client_id=TEST_CLIENT_ID,
-    brand="insights",
-):
-    """Generic context manager for setting up MCP server mock patterns.
+def setup_toolset_mock(mcp_server, mock_client, mock_response=None, side_effect=None):
+    """Context manager for setting up MCP server mock patterns.
 
-    Args:
-        server_module: The server module to patch get_http_headers on
-        mcp_server: The MCP server instance
-        mock_client: The mock client to use
-        mock_response: Optional response to return from client methods
-        side_effect: Optional side effect for client methods
-        client_id: Client ID to use (default: TEST_CLIENT_ID)
-        brand: Brand for header names (default: "insights"). Use "red-hat-lightspeed" for lightspeed.
+    Replaces the server's insights_client with a mock and configures
+    its HTTP methods to return mock_response or raise side_effect.
     """
-    # Derive headers from brand (same logic as config.py)
-    brand_prefix = brand.replace("red-hat-", "")
-    id_header = f"{brand_prefix.lower()}-client-id"
-    secret_header = f"{brand_prefix.lower()}-client-secret"
+    if side_effect:
+        mock_client.get.side_effect = side_effect
+        mock_client.post.side_effect = side_effect
+        mock_client.put.side_effect = side_effect
+    else:
+        mock_client.get.return_value = mock_response
+        mock_client.post.return_value = mock_response
+        mock_client.put.return_value = mock_response
 
-    with patch.object(server_module, "get_http_headers") as mock_headers:
-        mock_headers.return_value = {
-            id_header: client_id,
-            secret_header: TEST_CLIENT_SECRET,
-        }
-
-        if side_effect:
-            mock_client.get.side_effect = side_effect
-            mock_client.post.side_effect = side_effect
-            mock_client.put.side_effect = side_effect
-        elif mock_response is not None:
-            mock_client.get.return_value = mock_response
-            mock_client.post.return_value = mock_response
-            mock_client.put.return_value = mock_response
-
-        mcp_server.clients[client_id] = mock_client
-        yield mock_headers
+    with patch.object(mcp_server, "insights_client", mock_client):
+        yield
 
 
 def assert_api_error_message(exception: BaseException, error_message: str = "API Error") -> None:
@@ -351,9 +325,14 @@ def multi_user_tokens():
     return oauth_utils_module.create_multi_user_tokens(num_users=3)
 
 
-@pytest.fixture(scope="session")
-def llm_api_context():
-    """Live API-derived placeholder values for LLM prompt tests (session scope)."""
+@functools.cache
+def _build_llm_api_context():
     from tests.llm_api_discovery import build_llm_api_context
 
     return asyncio.run(build_llm_api_context())
+
+
+@pytest.fixture(scope="session")
+def llm_api_context():
+    """Live API-derived placeholder values for LLM prompt tests (session scope)."""
+    return _build_llm_api_context()

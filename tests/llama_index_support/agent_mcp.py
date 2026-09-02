@@ -3,12 +3,12 @@
 import asyncio
 import logging
 import uuid
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Any, Optional, Sequence, cast
 
 import httpx
 from llama_index.core.agent.workflow.function_agent import FunctionAgent
 from llama_index.core.agent.workflow.workflow_events import AgentOutput
-from llama_index.core.base.llms.types import ChatResponse
+from llama_index.core.base.llms.types import ChatResponse, ToolCallBlock
 from llama_index.core.llms import ChatMessage
 from llama_index.core.llms.function_calling import FunctionCallingLLM
 from llama_index.core.memory import Memory
@@ -47,7 +47,7 @@ def _chat_message_text(message: ChatMessage) -> str:
     content = message.content
     if isinstance(content, str) and content:
         return content
-    block_texts: List[str] = []
+    block_texts: list[str] = []
     for block in getattr(message, "blocks", None) or []:
         text = getattr(block, "text", None)
         if text:
@@ -66,9 +66,32 @@ def _assistant_text_from_handler_response(response: Any) -> str:
     return str(response)
 
 
-def _chat_history_without_system(messages: List[ChatMessage]) -> List[ChatMessage]:
+def _chat_history_without_system(messages: list[ChatMessage]) -> list[ChatMessage]:
     """Drop system messages; MCP instructions are injected on the user turn instead."""
     return [message for message in messages if message.role != "system"]
+
+
+def _preserve_tool_call_metadata(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Ensure provider-specific tool call metadata survives message serialization.
+
+    llama-index reconstructs tool calls from ToolCallBlocks, dropping extra fields the
+    provider included (e.g. Gemini thought_signature). When raw tool_calls are available
+    in additional_kwargs, remove ToolCallBlocks so the serializer uses the originals.
+    Additionally, sync additional_kwargs to match surviving ToolCallBlocks so that
+    force_single_tool_call pruning is not undone when blocks are removed.
+    """
+    patched: list[ChatMessage] = []
+    for msg in messages:
+        if msg.role == "assistant" and "tool_calls" in msg.additional_kwargs:
+            surviving_ids = {b.tool_call_id for b in msg.blocks if isinstance(b, ToolCallBlock)}
+            raw_tool_calls = msg.additional_kwargs["tool_calls"]
+            if surviving_ids and len(raw_tool_calls) != len(surviving_ids):
+                raw_tool_calls = [tc for tc in raw_tool_calls if tc.id in surviving_ids]
+            kwargs = {**msg.additional_kwargs, "tool_calls": raw_tool_calls}
+            blocks = [b for b in msg.blocks if not isinstance(b, ToolCallBlock)]
+            msg = ChatMessage(role=msg.role, blocks=blocks, additional_kwargs=kwargs)
+        patched.append(msg)
+    return patched
 
 
 class ToolRequiredFunctionAgent(FunctionAgent):
@@ -81,13 +104,13 @@ class ToolRequiredFunctionAgent(FunctionAgent):
 
     async def _get_response(
         self,
-        current_llm_input: List[ChatMessage],
+        current_llm_input: list[ChatMessage],
         tools: Sequence[AsyncBaseTool],
     ) -> ChatResponse:
         # Require a tool call only before any tool output is in context; later turns need room for history.
         tool_required = not any(message.role == "tool" for message in current_llm_input)
-        chat_kwargs: Dict[str, Any] = {
-            "chat_history": current_llm_input,
+        chat_kwargs: dict[str, Any] = {
+            "chat_history": _preserve_tool_call_metadata(current_llm_input),
             "allow_parallel_tool_calls": self.allow_parallel_tool_calls,
             "tools": tools,
             "tool_required": tool_required,
@@ -113,21 +136,21 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         model_id: str,
         api_key: str,
         verbose_logger: Optional[logging.Logger] = None,
-        mcp_http_headers: Optional[Dict[str, str]] = None,
+        mcp_http_headers: Optional[dict[str, str]] = None,
     ):  # pylint: disable=too-many-instance-attributes
         self.server_url = server_url
         self.mcp_http_headers = mcp_http_headers
         self.api_url = api_url
         self.model_id = model_id
         self.api_key = api_key
-        self.tools: Optional[List[BaseTool]] = []
+        self.tools: Optional[list[BaseTool]] = []
         self.mcp_instructions = ""
         self.agent: Optional[FunctionAgent] = None
         self.context: Optional[Context] = None
 
         self._session_id = str(uuid.uuid4())
         self._memory: Optional[Memory] = None
-        self._step_names: List[str] = []
+        self._step_names: list[str] = []
         self._mcp_client: Optional[BasicMCPClient] = None
         self._llm_http_client: Optional[httpx.AsyncClient] = None
         self._initialized = False
@@ -179,7 +202,7 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
         self._mcp_client = None
         self._initialized = False
 
-    async def get_archived_messages(self) -> List[ChatMessage]:
+    async def get_archived_messages(self) -> list[ChatMessage]:
         """Return messages archived by Memory waterfall (empty if under token_limit)."""
         if self._memory is None:
             raise ValueError("Agent not initialized")
@@ -246,9 +269,9 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
     async def execute_with_reasoning(
         self,
         user_msg: str,
-        chat_history: Optional[List[ChatMessage]] = None,
+        chat_history: Optional[list[ChatMessage]] = None,
         max_iterations: int = 10,
-    ) -> Tuple[str, List[Dict[str, Any]], List[Any], List[ChatMessage]]:
+    ) -> tuple[str, list[dict[str, Any]], list[Any], list[ChatMessage]]:
         """Execute agent, record tool calls and steps, return response and artifacts."""
         if not self.agent or self.llama_llm is None or self._memory is None:
             raise ValueError("Agent not initialized")
@@ -312,7 +335,7 @@ class MCPAgentWrapper:  # pylint: disable=too-many-instance-attributes
                     self.model_id,
                 )
 
-        reasoning_steps: List[Dict[str, Any]] = [
+        reasoning_steps: list[dict[str, Any]] = [
             {"step_number": idx + 1, "step_type": "event", "content": name} for idx, name in enumerate(self._step_names)
         ]
 
