@@ -216,7 +216,7 @@ run-oauth: build ## Run the MCP server with OAuth transport
 
 ALL_PYTHON_FILES := $(shell find src -name "*.py")
 
-PROMPTS_GENERATOR_DEPS := scripts/generate_test_prompts.py src/insights_mcp/test_prompts_markdown.py src/insights_mcp/test_prompts_data.py
+PROMPTS_GENERATOR_DEPS := scripts/generate_test_prompts.py src/insights_mcp/test_prompts_markdown.py tests/mcp_llm_eval/data.py
 
 .PHONY: generate-docs tool-tokens-md test-prompts-md
 generate-docs: usage.md toolsets.md docs/tool-tokens.md test-prompts-md docs/architecture-structure.svg docs/architecture-deployment.svg ## Generate documentation from the MCP server

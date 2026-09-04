@@ -9,17 +9,35 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# The prompt registries use the test-only mcp_llm_eval package. Keep this script
+# runnable directly without requiring callers to configure PYTHONPATH.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY_ROOT / "tests"))
+
+# Doc-only examples for generated test_prompts.md (never used at test runtime).
+MARKDOWN_PLACEHOLDER_EXAMPLES: dict[str, str] = {
+    "cve_id": "CVE-2024-1234",
+    "system_id": "12345678-1234-1234-1234-123456789abc",
+    "host_id": "12345678-1234-1234-1234-123456789abc",
+    "hostname": "web-server-prod-01",
+    "host_ids": "12345678-1234-1234-1234-123456789abc, 87654321-4321-4321-4321-ba9876543210",
+    "rule_id": "network_firewall_zone_drift_enabled|ENABLE_FIREWALL_ZONE_DRIFTING_WARN",
+    "workspace": "your_workspace",
+    "satellite_tag": "lifecycle_environment=Prod",
+    "rbac_username": "john.doe",
+}
+
 
 def _load_prompt_module(module_name: str) -> Any:
-    from insights_mcp.test_prompts_data import PromptRegistry
+    from mcp_llm_eval.data import TestScenarioRegistry
 
     module = importlib.import_module(module_name)
     if not hasattr(module, "TOOLSET_TITLE"):
         raise ValueError(f"{module_name} must define TOOLSET_TITLE")
     if not hasattr(module, "PROMPTS"):
         raise ValueError(f"{module_name} must define PROMPTS")
-    if not isinstance(module.PROMPTS, PromptRegistry):
-        raise ValueError(f"{module_name}.PROMPTS must be a PromptRegistry instance")
+    if not isinstance(module.PROMPTS, TestScenarioRegistry):
+        raise ValueError(f"{module_name}.PROMPTS must be a TestScenarioRegistry instance")
     return module
 
 
@@ -40,11 +58,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    from insights_mcp.test_prompts_data import collect_markdown_prompts
+    from mcp_llm_eval.data import collect_markdown_prompts
+
     from insights_mcp.test_prompts_markdown import format_bullet_prompts
 
     module = _load_prompt_module(args.module)
-    prompt_texts = collect_markdown_prompts(module.PROMPTS)
+    prompt_texts = collect_markdown_prompts(module.PROMPTS, MARKDOWN_PLACEHOLDER_EXAMPLES)
     markdown = format_bullet_prompts(module.TOOLSET_TITLE, prompt_texts)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

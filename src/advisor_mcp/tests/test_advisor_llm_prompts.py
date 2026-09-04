@@ -1,10 +1,10 @@
 """LLM integration tests for advisor MCP prompts."""
 
-from advisor_mcp.test_prompts import PROMPTS
-from tests.llm_prompt_support import create_llm_prompt_test_class
+from mcp_llm_eval.generators import create_test_suite
 
-TestAdvisorLLMPrompts = create_llm_prompt_test_class(
-    "advisor",
+from advisor_mcp.test_prompts import PROMPTS
+
+TestAdvisorLLMPrompts = create_test_suite(
     PROMPTS,
     "TestAdvisorLLMPrompts",
 )

@@ -1,12 +1,16 @@
 """Single source of truth for RHSM LLM test prompts."""
 
-from insights_mcp.test_prompts_data import PromptRegistry
+from mcp_llm_eval.data import PromptWithTools, TestScenario, TestScenarioRegistry
 
 TOOLSET_TITLE = "Red Hat Subscription Management (RHSM) MCP Test Prompts"
 
-PROMPTS = PromptRegistry(
-    list_activation_keys=(
-        "Show me the list of activation keys",
-        ("rhsm__get_activation_keys",),
+PROMPTS = TestScenarioRegistry(
+    list_activation_keys=TestScenario(
+        turns=(
+            PromptWithTools(
+                prompt="Show me the list of activation keys",
+                expected_tools=("rhsm__get_activation_keys",),
+            ),
+        ),
     ),
 )
