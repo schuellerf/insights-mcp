@@ -197,7 +197,17 @@ sequenceDiagram
 
 Here is the rendered version: [Deployment Flow](docs/architecture-deployment.svg)
 
-**Note**: To regenerate the `SVG` diagram images, run `make generate-docs`. The diagrams are also rendered directly by GitHub when viewing this file.
+**Note**: To regenerate the diagram images, run `make generate-docs`. The diagrams are also rendered directly by GitHub when viewing this file.
+
+`PNG` screenshots are rendered from the `linux/amd64` `mermaid-cli` image with GPU disabled, so the committed files match on every machine. `SVG` generation stays on the host architecture. Apple Silicon Podman cannot run the `amd64` image until that virtual machine can emulate it. Intel Macs and Linux need nothing extra.
+
+`exec format error` means that emulation is missing. Install `qemu-user-static` inside the Podman machine (`podman machine ssh`), or recreate the machine with emulation enabled. Do not drop `--platform linux/amd64` from the generator. Check with:
+
+```bash
+podman run --rm --platform linux/amd64 --entrypoint /bin/true ghcr.io/mermaid-js/mermaid-cli/mermaid-cli:12.0.0
+```
+
+A Mac without emulation can still refresh the `SVG` files with `uv run python scripts/generate_diagrams.py --format svg`. `make generate-docs` stops when it reaches the `PNG` step. The image tag is `MERMAID_CLI_IMAGE` in `scripts/generate_diagrams.py`.
 
 ### Session Cache and Token Management
 

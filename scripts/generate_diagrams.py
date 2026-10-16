@@ -6,14 +6,42 @@ diagrams (SVG, PNG, etc.) using Podman with the Mermaid CLI container.
 """
 
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-MERMAID_CLI_IMAGE = "ghcr.io/mermaid-js/mermaid-cli/mermaid-cli:11.14.1-beta.13"
+MERMAID_CLI_IMAGE = "ghcr.io/mermaid-js/mermaid-cli/mermaid-cli:12.0.0"
+# PNG runs use this binary as the container entrypoint.
+MERMAID_CLI_BIN = "/home/mermaidcli/node_modules/.bin/mmdc"
+# Host temporary directory, mounted as the container HOME for Chromium.
+CONTAINER_HOME = "/tmp"
+PNG_PLATFORM = "linux/amd64"
+PNG_PUPPETEER_CONFIG_NAME = "puppeteer-png.json"
+PNG_CSS_NAME = "diagram-png.css"
+PNG_PUPPETEER_CONFIG: dict[str, str | list[str]] = {
+    "executablePath": "/usr/bin/chromium-browser",
+    "args": [
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--use-gl=disabled",
+    ],
+}
+# themeCSS for PNG renders. Disables drop-shadow filters on sequence and flowchart shapes.
+PNG_DROP_SHADOW_CSS = """\
+g rect.rect { filter: none !important; }
+rect.actor { filter: none !important; }
+.labelBox { filter: none !important; }
+.node rect { filter: none !important; }
+.node polygon { filter: none !important; }
+.node path { filter: none !important; }
+.node circle { filter: none !important; }
+"""
 
 
 def extract_mermaid_blocks(markdown_file: Path) -> dict[str, str]:
@@ -67,6 +95,111 @@ def check_podman() -> bool:
     return shutil.which("podman") is not None
 
 
+def amd64_emulation_hint() -> str:
+    """Explain a failed linux/amd64 PNG run.
+
+    Returns:
+        Hint naming the pinned image, the missing emulation, and HACKING.md.
+    """
+    return (
+        "PNG renders are pinned to linux/amd64 and are not retried on the host architecture. "
+        f"PNG generation runs {MERMAID_CLI_IMAGE} as linux/amd64 so the screenshot matches the committed bytes. "
+        "Apple Silicon Podman needs amd64 emulation (qemu-user-static inside the podman machine). "
+        "See the diagram note under Deployment Flow in HACKING.md. "
+        "SVG generation does not need amd64."
+    )
+
+
+def diagram_generation_error(format_type: str, returncode: int, stderr: str) -> str:
+    """Explain a failed mermaid-cli run.
+
+    Args:
+        format_type: Requested output format, such as ``svg`` or ``png``.
+        returncode: Exit status from podman.
+        stderr: Captured podman stderr. Included when it reports an exec format error.
+
+    Returns:
+        Error text. PNG failures name the amd64 pin and the HACKING.md emulation note.
+    """
+    message = f"Failed to generate {format_type.upper()}: podman exited with status {returncode}"
+    if format_type != "png":
+        return message
+    if "exec format" in stderr.lower():
+        message = f"{message}: {stderr.strip()}"
+    return f"{message}. {amd64_emulation_hint()}"
+
+
+def podman_run_command(docs_dir: Path, output_file: Path, format_type: str, home_dir: Path) -> list[str]:
+    """Build the podman argv that renders one diagram.
+
+    SVG runs stay on the host architecture and skip font embedding.
+    PNG runs use linux/amd64, ``MERMAID_CLI_BIN``, the software-GL Puppeteer
+    config, and the drop-shadow stylesheet.
+    ``home_dir`` is mounted as the container HOME.
+
+    Args:
+        docs_dir: Host directory mounted at ``/data`` in the container.
+        output_file: Host path whose name is the container output file.
+        format_type: ``svg`` or ``png``.
+        home_dir: Host directory to mount as ``CONTAINER_HOME``.
+
+    Returns:
+        Argv for ``podman run``.
+    """
+    command = [
+        "podman",
+        "run",
+        "--rm",
+        "--userns=keep-id",
+        f"--user={os.getuid()}",
+        "-e",
+        f"HOME={CONTAINER_HOME}",
+        "-v",
+        f"{home_dir.resolve()}:{CONTAINER_HOME}:Z",
+    ]
+    if format_type == "png":
+        command.extend(["--platform", PNG_PLATFORM, "--entrypoint", MERMAID_CLI_BIN])
+    command.extend(
+        [
+            "-v",
+            f"{docs_dir.absolute()}:/data:Z",
+            MERMAID_CLI_IMAGE,
+            "-i",
+            "/data/input.mmd",
+            "-o",
+            f"/data/{output_file.name}",
+        ]
+    )
+    if format_type == "svg":
+        command.append("--no-font-embed")
+    if format_type == "png":
+        command.extend(
+            [
+                "-p",
+                f"/data/{PNG_PUPPETEER_CONFIG_NAME}",
+                "-C",
+                f"/data/{PNG_CSS_NAME}",
+            ]
+        )
+    return command
+
+
+def _write_png_render_files(docs_dir: Path) -> list[Path]:
+    """Write the puppeteer config and drop-shadow override into the mount.
+
+    Args:
+        docs_dir: Directory mounted into the container as ``/data``.
+
+    Returns:
+        Paths that the caller must delete after the container exits.
+    """
+    puppeteer_path = docs_dir / PNG_PUPPETEER_CONFIG_NAME
+    css_path = docs_dir / PNG_CSS_NAME
+    puppeteer_path.write_text(json.dumps(PNG_PUPPETEER_CONFIG, indent=2) + "\n", encoding="utf-8")
+    css_path.write_text(PNG_DROP_SHADOW_CSS, encoding="utf-8")
+    return [puppeteer_path, css_path]
+
+
 def generate_diagram_from_mermaid(mermaid_code: str, output_file: Path, docs_dir: Path, format_type: str) -> None:
     """Generate diagram from Mermaid code using Podman with Mermaid CLI container.
 
@@ -77,7 +210,7 @@ def generate_diagram_from_mermaid(mermaid_code: str, output_file: Path, docs_dir
         format_type: Output format (e.g., 'svg', 'png')
 
     Raises:
-        subprocess.CalledProcessError: If podman command fails
+        RuntimeError: If podman exits unsuccessfully. PNG failures include the amd64 emulation hint.
         FileNotFoundError: If podman is not available
     """
     if not check_podman():
@@ -87,29 +220,15 @@ def generate_diagram_from_mermaid(mermaid_code: str, output_file: Path, docs_dir
     input_file = docs_dir / "input.mmd"
     input_file.write_text(mermaid_code, encoding="utf-8")
 
-    container_image = MERMAID_CLI_IMAGE
-
-    # Run podman to convert Mermaid to requested format
-    # Mount docs_dir as both /data (for input) and /output (for output)
     docs_dir.mkdir(parents=True, exist_ok=True)
-
-    cmd = [
-        "podman",
-        "run",
-        "--rm",
-        "--userns=keep-id",
-        f"--user={os.getuid()}",
-        "-v",
-        f"{docs_dir.absolute()}:/data:Z",
-        container_image,
-        "-i",
-        "/data/input.mmd",
-        "-o",
-        f"/data/{output_file.name}",
-    ]
+    extra_files: list[Path] = []
+    if format_type == "png":
+        extra_files.extend(_write_png_render_files(docs_dir))
 
     try:
-        subprocess.run(cmd, check=True)
+        with tempfile.TemporaryDirectory(prefix="insights-mcp-diagram-") as diagram_home:
+            cmd = podman_run_command(docs_dir, output_file, format_type, Path(diagram_home))
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
 
         # Post-process SVG to make box border match background color
         # This makes the border effectively invisible
@@ -117,12 +236,16 @@ def generate_diagram_from_mermaid(mermaid_code: str, output_file: Path, docs_dir
         if format_type == "svg" and output_file.exists():
             _make_box_border_match_background(output_file, rgb_color=(225, 245, 255))
     except subprocess.CalledProcessError as e:
-        error_msg = f"Failed to generate {format_type.upper()}: podman exited with status {e.returncode}"
-        raise RuntimeError(error_msg) from e
+        if e.stdout:
+            print(e.stdout, file=sys.stderr)
+        if e.stderr:
+            print(e.stderr, file=sys.stderr)
+        stderr_text = e.stderr or ""
+        raise RuntimeError(diagram_generation_error(format_type, e.returncode, stderr_text)) from e
     finally:
-        # Clean up input file
-        if input_file.exists():
-            input_file.unlink()
+        for path in [input_file, *extra_files]:
+            if path.exists():
+                path.unlink()
 
 
 def _make_box_border_match_background(svg_file: Path, rgb_color: tuple[int, int, int]) -> None:
