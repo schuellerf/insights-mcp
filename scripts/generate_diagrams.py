@@ -20,7 +20,8 @@ MERMAID_CLI_IMAGE = "ghcr.io/mermaid-js/mermaid-cli/mermaid-cli:12.0.0"
 MERMAID_CLI_BIN = "/home/mermaidcli/node_modules/.bin/mmdc"
 # Host temporary directory, mounted as the container HOME for Chromium.
 CONTAINER_HOME = "/tmp"
-PNG_PLATFORM = "linux/amd64"
+# Both SVG and PNG runs use this platform. A cached arm64 tag is not reused.
+DIAGRAM_PLATFORM = "linux/amd64"
 PNG_PUPPETEER_CONFIG_NAME = "puppeteer-png.json"
 PNG_CSS_NAME = "diagram-png.css"
 PNG_PUPPETEER_CONFIG: dict[str, str | list[str]] = {
@@ -96,17 +97,16 @@ def check_podman() -> bool:
 
 
 def amd64_emulation_hint() -> str:
-    """Explain a failed linux/amd64 PNG run.
+    """Explain a failed linux/amd64 diagram run.
 
     Returns:
         Hint naming the pinned image, the missing emulation, and HACKING.md.
     """
     return (
-        "PNG renders are pinned to linux/amd64 and are not retried on the host architecture. "
-        f"PNG generation runs {MERMAID_CLI_IMAGE} as linux/amd64 so the screenshot matches the committed bytes. "
+        "Diagram renders are pinned to linux/amd64 and are not retried on the host architecture. "
+        f"Generation runs {MERMAID_CLI_IMAGE} as linux/amd64. "
         "Apple Silicon Podman needs amd64 emulation (qemu-user-static inside the podman machine). "
-        "See the diagram note under Deployment Flow in HACKING.md. "
-        "SVG generation does not need amd64."
+        "See the diagram note under Deployment Flow in HACKING.md."
     )
 
 
@@ -119,22 +119,24 @@ def diagram_generation_error(format_type: str, returncode: int, stderr: str) -> 
         stderr: Captured podman stderr. Included when it reports an exec format error.
 
     Returns:
-        Error text. PNG failures name the amd64 pin and the HACKING.md emulation note.
+        Error text. PNG failures and exec format errors name the amd64 pin and HACKING.md.
     """
     message = f"Failed to generate {format_type.upper()}: podman exited with status {returncode}"
-    if format_type != "png":
-        return message
-    if "exec format" in stderr.lower():
+    exec_format_error = "exec format" in stderr.lower()
+    if exec_format_error:
         message = f"{message}: {stderr.strip()}"
-    return f"{message}. {amd64_emulation_hint()}"
+    if format_type == "png" or exec_format_error:
+        return f"{message}. {amd64_emulation_hint()}"
+    return message
 
 
 def podman_run_command(docs_dir: Path, output_file: Path, format_type: str, home_dir: Path) -> list[str]:
     """Build the podman argv that renders one diagram.
 
-    SVG runs stay on the host architecture and skip font embedding.
-    PNG runs use linux/amd64, ``MERMAID_CLI_BIN``, the software-GL Puppeteer
-    config, and the drop-shadow stylesheet.
+    Both formats run ``DIAGRAM_PLATFORM`` and do not fall back to the host architecture.
+    SVG runs skip font embedding.
+    PNG runs use ``MERMAID_CLI_BIN``, the software-GL Puppeteer config, and the
+    drop-shadow stylesheet.
     ``home_dir`` is mounted as the container HOME.
 
     Args:
@@ -152,13 +154,15 @@ def podman_run_command(docs_dir: Path, output_file: Path, format_type: str, home
         "--rm",
         "--userns=keep-id",
         f"--user={os.getuid()}",
+        "--platform",
+        DIAGRAM_PLATFORM,
         "-e",
         f"HOME={CONTAINER_HOME}",
         "-v",
         f"{home_dir.resolve()}:{CONTAINER_HOME}:Z",
     ]
     if format_type == "png":
-        command.extend(["--platform", PNG_PLATFORM, "--entrypoint", MERMAID_CLI_BIN])
+        command.extend(["--entrypoint", MERMAID_CLI_BIN])
     command.extend(
         [
             "-v",
